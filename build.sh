@@ -48,6 +48,12 @@ if [ -f "dist/bsot" ]; then
     echo "Testing binary..."
     ./dist/bsot --version
 
+    # Clean up build artifacts
+    echo ""
+    echo "Cleaning up build artifacts..."
+    rm -rf dist/bsot.dist dist/bsot.build dist/bsot.onefile-build
+    echo "  ✅ Removed temporary build files"
+
     echo ""
     echo "Test the binary:"
     echo "  ./dist/bsot --help"
@@ -56,8 +62,8 @@ if [ -f "dist/bsot" ]; then
     echo "To install globally:"
     echo "  sudo cp dist/bsot /usr/local/bin/"
     echo ""
-    echo "Size comparison:"
-    ls -lh dist/bsot | awk '{print "  Binary size: " $5}'
+    echo "Final binary:"
+    ls -lh dist/bsot | awk '{print "  " $9 " - " $5}'
 else
     echo "❌ Build failed! Check errors above."
     exit 1
