@@ -116,8 +116,19 @@ bsot network ssl-check --help
 - dnspython>=2.1.0
 
 ## License
+Copyright (c) 2025 Jaryd Remillard. All rights reserved.
 
-MIT License
+This software is licensed for personal, non-commercial use only. You may use and modify the software for private purposes, but distribution is prohibited.
+
+Key restrictions:
+
+✅ Personal use allowed
+✅ Modifications for personal use allowed
+❌ No distribution of original or modified versions
+❌ No commercial use
+Commercial licensing: For commercial use or distribution rights, contact jaryd.remillard@gmail.com
+
+See the LICENSE file for full terms.
 
 ## Contributing
 
