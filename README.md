@@ -37,7 +37,7 @@ A comprehensive command-line security toolkit for system administrators, securit
 
 ```bash
 # Install from source
-git clone <repository-url>
+git clone git@github.com:Remillardj/SecurityToolbox.git
 cd SecurityToolbox
 pip install -e .
 
