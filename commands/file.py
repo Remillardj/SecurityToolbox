@@ -137,97 +137,209 @@ def suid_finder(directory, verbose):
     click.echo(f"Scan complete: {len(suid_files)} SUID, {len(sgid_files)} SGID binaries found")
 
 @file_group.command('cred-scan')
-@click.argument('directory')
-@click.option('-e', '--extensions', default='py,js,json,yaml,yml,env,conf,config,sh,txt',
-              help='File extensions to scan (comma-separated)')
-@click.option('-v', '--verbose', is_flag=True, help='Show file being scanned')
-@click.option('--context', default=2, help='Lines of context to show around matches')
-def cred_scan(directory, extensions, verbose, context):
+@click.argument('path', default='.')
+@click.option('-r', '--recursive', is_flag=True, default=True, help='Scan recursively (default: true)')
+@click.option('--no-recursive', is_flag=True, help='Disable recursive scanning')
+@click.option('-l', '--include-low', is_flag=True, help='Include low-confidence findings')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output for CI/CD')
+@click.option('-q', '--quiet', is_flag=True, help='Only output on findings (for CI)')
+@click.option('-v', '--verbose', is_flag=True, help='Show files being scanned')
+def cred_scan(path, recursive, no_recursive, include_low, json_output, quiet, verbose):
     """Scan files for hardcoded credentials and secrets
 
+    Detects API keys, private keys, passwords, tokens, and other secrets
+    in source code and configuration files.
+
+    Exit codes:
+      0 - No secrets found
+      1 - Secrets detected  
+      2 - Error
+
     Examples:
-        bsot file cred-scan /path/to/project
-        bsot file cred-scan . --extensions "py,js,env"
-        bsot file cred-scan ./src --verbose --context 3
+        bsot file cred-scan .
+        bsot file cred-scan src/ --json
+        bsot file cred-scan . --include-low
+        
+    CI/CD Usage:
+        bsot file cred-scan . --quiet --json > secrets.json || exit 1
     """
-    # Patterns for detecting secrets
-    patterns = {
-        'AWS Access Key': re.compile(r'AKIA[0-9A-Z]{16}'),
-        'AWS Secret Key': re.compile(r'aws_secret_access_key\s*=\s*["\']?([A-Za-z0-9/+=]{40})["\']?', re.IGNORECASE),
-        'Generic API Key': re.compile(r'api[_-]?key\s*[=:]\s*["\']([A-Za-z0-9_\-]{20,})["\']', re.IGNORECASE),
-        'Generic Secret': re.compile(r'secret\s*[=:]\s*["\']([^"\']{8,})["\']', re.IGNORECASE),
-        'Password': re.compile(r'password\s*[=:]\s*["\']([^"\']{4,})["\']', re.IGNORECASE),
-        'Private Key': re.compile(r'-----BEGIN (RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY-----'),
-        'JWT Token': re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'),
-        'GitHub Token': re.compile(r'gh[pousr]_[A-Za-z0-9_]{36,}'),
-        'Slack Token': re.compile(r'xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,}'),
-        'Google API Key': re.compile(r'AIza[0-9A-Za-z_-]{35}'),
-        'Database URL': re.compile(r'(mysql|postgres|mongodb)://[^:]+:[^@]+@[^/]+', re.IGNORECASE),
-        'Generic Token': re.compile(r'token\s*[=:]\s*["\']([A-Za-z0-9_\-]{20,})["\']', re.IGNORECASE),
+    import json
+    import sys
+    
+    # Comprehensive secret patterns with confidence levels
+    PATTERNS = {
+        # AWS (HIGH)
+        'aws_access_key': (re.compile(r'(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'), 'high'),
+        'aws_secret_key': (re.compile(r'(?i)aws_?(?:secret_?)?(?:access_?)?key["\']?\s*[:=]\s*["\']?([A-Za-z0-9/+=]{40})["\']?'), 'high'),
+        
+        # GitHub (HIGH)
+        'github_token': (re.compile(r'gh[pousr]_[A-Za-z0-9_]{36,}'), 'high'),
+        'github_oauth': (re.compile(r'github_pat_[A-Za-z0-9_]{22,}'), 'high'),
+        
+        # Slack (HIGH)
+        'slack_token': (re.compile(r'xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*'), 'high'),
+        'slack_webhook': (re.compile(r'https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+'), 'high'),
+        
+        # Google/GCP (HIGH)
+        'gcp_api_key': (re.compile(r'AIza[0-9A-Za-z_-]{35}'), 'high'),
+        'gcp_service_account': (re.compile(r'"type"\s*:\s*"service_account"'), 'high'),
+        
+        # Stripe (HIGH)
+        'stripe_api_key': (re.compile(r'(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{24,}'), 'high'),
+        
+        # SendGrid (HIGH)
+        'sendgrid_api_key': (re.compile(r'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'), 'high'),
+        
+        # Private Keys (HIGH)
+        'private_key_rsa': (re.compile(r'-----BEGIN (?:RSA )?PRIVATE KEY-----'), 'high'),
+        'private_key_dsa': (re.compile(r'-----BEGIN DSA PRIVATE KEY-----'), 'high'),
+        'private_key_ec': (re.compile(r'-----BEGIN EC PRIVATE KEY-----'), 'high'),
+        'private_key_openssh': (re.compile(r'-----BEGIN OPENSSH PRIVATE KEY-----'), 'high'),
+        'private_key_pgp': (re.compile(r'-----BEGIN PGP PRIVATE KEY BLOCK-----'), 'high'),
+        
+        # Database URLs (HIGH)
+        'database_url': (re.compile(r'(?i)(?:mysql|postgres|postgresql|mongodb|redis)://[^\s<>"\']+:[^\s<>"\']+@[^\s<>"\']+'), 'high'),
+        
+        # NPM/PyPI (HIGH)
+        'npm_token': (re.compile(r'//registry\.npmjs\.org/:_authToken=[^\s]+'), 'high'),
+        'pypi_token': (re.compile(r'pypi-[A-Za-z0-9_-]{100,}'), 'high'),
+        
+        # Discord (HIGH/MEDIUM)
+        'discord_webhook': (re.compile(r'https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+'), 'high'),
+        'discord_token': (re.compile(r'(?:mfa\.)?[a-zA-Z0-9_-]{24,}\.[a-zA-Z0-9_-]{6}\.[a-zA-Z0-9_-]{27}'), 'medium'),
+        
+        # JWT (MEDIUM)
+        'jwt_token': (re.compile(r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*'), 'medium'),
+        
+        # Generic patterns (MEDIUM/LOW)
+        'password_assignment': (re.compile(r'(?i)(?:password|passwd|pwd|secret|token|api_?key|auth_?token)\s*[:=]\s*["\'][^"\']{8,}["\']'), 'medium'),
+        'bearer_token': (re.compile(r'(?i)bearer\s+[a-zA-Z0-9_-]{20,}'), 'medium'),
+        'basic_auth': (re.compile(r'(?i)basic\s+[a-zA-Z0-9+/=]{20,}'), 'medium'),
+        'generic_api_key': (re.compile(r'(?i)(?:api[_-]?key|apikey|api[_-]?secret)["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{16,}["\']?'), 'low'),
     }
-
-    ext_list = [e.strip() for e in extensions.split(',')]
+    
+    # File extensions to scan
+    EXTENSIONS = {'.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.go', '.rb', '.php',
+                  '.sh', '.bash', '.zsh', '.yml', '.yaml', '.json', '.xml', '.toml', 
+                  '.ini', '.cfg', '.conf', '.env', '.properties', '.tf', '.tfvars'}
+    ALWAYS_SCAN = {'.env', '.npmrc', '.pypirc', '.netrc', 'credentials', 'secrets'}
+    SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', 'vendor', 
+                 'target', 'build', 'dist', '.idea', '.vscode'}
+    SKIP_FILES = {'package-lock.json', 'yarn.lock', 'poetry.lock', 'Cargo.lock', 
+                  'go.sum', 'composer.lock'}
+    
+    def redact(secret, show=4):
+        if len(secret) <= show * 2:
+            return '*' * len(secret)
+        return secret[:show] + '*' * (len(secret) - show * 2) + secret[-show:]
+    
     findings = []
-
-    click.echo(f"Scanning directory: {directory}")
-    click.echo(f"File extensions: {', '.join(ext_list)}")
-    click.echo("=" * 60)
-
-    for root, _, files in os.walk(directory):
-        for file in files:
-            # Check file extension
-            file_ext = file.split('.')[-1] if '.' in file else ''
-            if file_ext not in ext_list:
-                continue
-
-            file_path = os.path.join(root, file)
-
-            if verbose:
-                click.echo(f"Scanning: {file_path}")
-
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
-
-                for line_num, line in enumerate(lines, 1):
-                    for pattern_name, pattern in patterns.items():
-                        matches = pattern.finditer(line)
-                        for match in matches:
-                            # Get context lines
-                            start_line = max(0, line_num - context - 1)
-                            end_line = min(len(lines), line_num + context)
-                            context_lines = lines[start_line:end_line]
-
-                            findings.append({
-                                'file': file_path,
-                                'line': line_num,
-                                'pattern': pattern_name,
-                                'match': match.group(0)[:50],  # Truncate for display
-                                'context': context_lines,
-                                'context_start': start_line + 1
-                            })
-            except (PermissionError, FileNotFoundError, UnicodeDecodeError) as e:
-                if verbose:
-                    click.echo(f"Error reading {file_path}: {e}", err=True)
-
-    # Display findings
-    if findings:
-        click.echo(f"\n🔴 POTENTIAL SECRETS FOUND ({len(findings)}):\n")
-        for finding in findings:
-            click.echo(f"📁 {finding['file']}:{finding['line']}")
-            click.echo(f"🔍 Pattern: {finding['pattern']}")
-            click.echo(f"🔑 Match: {finding['match']}...")
-            click.echo(f"\nContext:")
-            for i, ctx_line in enumerate(finding['context']):
-                line_no = finding['context_start'] + i
-                prefix = ">>>" if line_no == finding['line'] else "   "
-                click.echo(f"  {prefix} {line_no:4d} | {ctx_line.rstrip()}")
-            click.echo()
+    files_scanned = 0
+    errors = []
+    
+    scan_path = Path(path)
+    
+    if scan_path.is_file():
+        files_to_scan = [scan_path]
     else:
-        click.echo("✅ No hardcoded credentials found")
-
-    click.echo("=" * 60)
-    click.echo(f"Scan complete: {len(findings)} potential secret(s) found")
+        if recursive and not no_recursive:
+            files_to_scan = scan_path.rglob('*')
+        else:
+            files_to_scan = scan_path.glob('*')
+    
+    for file_path in files_to_scan:
+        if not file_path.is_file():
+            continue
+        if any(skip in file_path.parts for skip in SKIP_DIRS):
+            continue
+        if file_path.name in SKIP_FILES:
+            continue
+        
+        should_scan = (file_path.suffix.lower() in EXTENSIONS or
+                       file_path.name in ALWAYS_SCAN or
+                       any(n in file_path.name.lower() for n in ALWAYS_SCAN))
+        if not should_scan:
+            continue
+        
+        files_scanned += 1
+        if verbose:
+            click.echo(f"Scanning: {file_path}", err=True)
+        
+        try:
+            content = file_path.read_text(errors='ignore')
+            for line_num, line in enumerate(content.splitlines(), 1):
+                for name, (pattern, confidence) in PATTERNS.items():
+                    if not include_low and confidence == 'low':
+                        continue
+                    for match in pattern.finditer(line):
+                        findings.append({
+                            'file': str(file_path),
+                            'line': line_num,
+                            'type': name,
+                            'match': redact(match.group()),
+                            'confidence': confidence,
+                            'content': line.strip()[:100],
+                        })
+        except Exception as e:
+            errors.append(f"{file_path}: {e}")
+    
+    # Build result
+    result = {
+        'files_scanned': files_scanned,
+        'files_with_secrets': len(set(f['file'] for f in findings)),
+        'total_findings': len(findings),
+        'findings': findings,
+        'errors': errors,
+    }
+    
+    if json_output:
+        click.echo(json.dumps(result, indent=2))
+        if findings:
+            sys.exit(1)
+        return
+    
+    if quiet and not findings:
+        sys.exit(0)
+    
+    if not quiet:
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"  Secret Scan Results")
+        click.echo(f"{'=' * 60}")
+        click.echo(f"  Path: {path}")
+        click.echo(f"  Files scanned: {files_scanned}")
+        click.echo(f"  Files with secrets: {result['files_with_secrets']}")
+        click.echo(f"  Total findings: {len(findings)}")
+    
+    if findings:
+        if not quiet:
+            click.echo(f"\n🔴 SECRETS DETECTED:\n")
+        
+        # Group by file
+        by_file = {}
+        for f in findings:
+            by_file.setdefault(f['file'], []).append(f)
+        
+        for file_path, file_findings in by_file.items():
+            try:
+                rel = Path(file_path).relative_to(Path.cwd())
+            except ValueError:
+                rel = file_path
+            click.echo(f"  📁 {rel}")
+            for f in file_findings:
+                conf_marker = '🔴' if f['confidence'] == 'high' else ('🟡' if f['confidence'] == 'medium' else '⚪')
+                click.echo(f"    {conf_marker} Line {f['line']}: [{f['confidence'].upper()}] {f['type']}")
+                click.echo(f"       Match: {f['match']}")
+            click.echo()
+        
+        if not quiet:
+            click.echo(f"{'=' * 60}")
+            click.echo(f"⚠️  {len(findings)} secret(s) detected! Review before committing.")
+        
+        sys.exit(1)
+    else:
+        if not quiet:
+            click.echo(f"\n✅ No secrets found")
+            click.echo(f"{'=' * 60}")
 
 @file_group.command('hash-check')
 @click.argument('file_path', type=click.Path(exists=True))

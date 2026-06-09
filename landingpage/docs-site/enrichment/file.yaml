@@ -1,0 +1,96 @@
+# Enrichment data for file module documentation
+
+description: |
+  Analyze files for security investigations. Hash files, identify types,
+  extract strings, analyze entropy, and extract metadata.
+
+commands:
+  hash:
+    description: |
+      Calculate cryptographic hashes for files. Supports MD5, SHA1, SHA256, and SHA512.
+    examples:
+      - title: "SHA256 Hash"
+        code: "bsot file hash sample.exe"
+        output: |
+          sample.exe
+            SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+      - title: "All Hashes"
+        code: "bsot file hash sample.exe --all"
+      - title: "JSON Output"
+        code: "bsot file hash sample.exe --all --json"
+      - title: "Recursive Directory"
+        code: "bsot file hash /path/to/dir -r --json"
+    tips:
+      - "Use SHA256 for VirusTotal and most threat intel lookups"
+      - "MD5 is useful for legacy systems but not cryptographically secure"
+
+  identify:
+    description: |
+      Identify file type using magic bytes. Detects extension mismatches (e.g., EXE renamed to PDF).
+    examples:
+      - title: "Identify File"
+        code: "bsot file identify suspicious.pdf"
+        output: |
+          File: suspicious.pdf
+            Size: 245,760 bytes
+            MIME Type: application/x-executable
+            Description: PE32 executable (GUI)
+            Magic Bytes: 4D 5A
+            Expected Extensions: .exe, .dll
+          
+            [HIGH] Extension Mismatch Detected!
+              File has .pdf extension but is a Windows executable
+    tips:
+      - "Extension mismatches are a common malware evasion technique"
+
+  strings:
+    description: |
+      Extract human-readable strings from files. Useful for finding URLs, IPs, and other indicators.
+    examples:
+      - title: "Basic Extraction"
+        code: "bsot file strings binary.exe"
+      - title: "Minimum Length"
+        code: "bsot file strings binary.exe --min-length 8"
+      - title: "Filter by Category"
+        code: "bsot file strings binary.exe --category urls,ips"
+    tips:
+      - "Combine with malware strings command for categorized output"
+
+  entropy:
+    description: |
+      Calculate file entropy to detect encryption, compression, or packing.
+    examples:
+      - title: "Entropy Analysis"
+        code: "bsot file entropy sample.exe"
+        output: |
+          Entropy Analysis: sample.exe
+            File size: 245,760 bytes
+            Entropy: 7.82/8.0
+            Verdict: HIGH
+          
+            ⚠️  High entropy detected - file may be encrypted, packed, or obfuscated
+    tips:
+      - "Entropy > 7.0 often indicates packing or encryption"
+      - "Normal executables typically have entropy between 5.0-6.5"
+
+  metadata:
+    description: |
+      Extract metadata from files including EXIF data from images and PDF metadata.
+    examples:
+      - title: "Extract Metadata"
+        code: "bsot file metadata document.pdf"
+
+  cred-scan:
+    description: |
+      Scan files for hardcoded credentials, API keys, and secrets.
+    examples:
+      - title: "Scan File"
+        code: "bsot file cred-scan config.py"
+      - title: "Scan Directory"
+        code: "bsot file cred-scan /path/to/project -r"
+
+related:
+  - "bsot malware strings"
+  - "bsot malware pe"
+  - "bsot intel enrich"
+

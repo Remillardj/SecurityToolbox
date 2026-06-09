@@ -1,0 +1,139 @@
+site_name: BSOT Documentation
+site_description: Blue Security Ops Toolkit — CLI for security analysts
+site_url: https://bsot.dev/docs/
+repo_url: https://github.com/yourname/bsot
+repo_name: bsot
+
+# Build output goes into the unified site folder
+site_dir: ../site/docs
+
+# Use .html extensions instead of directories (works with file:// protocol)
+use_directory_urls: false
+
+theme:
+  name: material
+  
+  palette:
+    # Dark mode (default)
+    - scheme: slate
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    # Light mode
+    - scheme: default
+      primary: cyan
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+    - announce.dismiss
+  
+  font:
+    text: Inter
+    code: JetBrains Mono
+  
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/shield-check
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Configuration: getting-started/configuration.md
+    - Quick Start: getting-started/quick-start.md
+  - Modules:
+    - modules/index.md
+    - Phishing: modules/phishing.md
+    - Intel: modules/intel.md
+    - File: modules/file.md
+    - Network: modules/network.md
+    - Logs: modules/logs.md
+    - Data: modules/data.md
+    - Auth: modules/auth.md
+    - System: modules/system.md
+    - IR: modules/ir.md
+    - Malware: modules/malware.md
+    - Report: modules/report.md
+    - OSINT: modules/osint.md
+  - Use Cases:
+    - use-cases/index.md
+    - Phishing Investigation: use-cases/phishing-investigation.md
+    - Malware Triage: use-cases/malware-triage.md
+    - Incident Response: use-cases/incident-response.md
+    - Threat Hunting: use-cases/threat-hunting.md
+    - Log Analysis: use-cases/log-analysis.md
+  - Examples: examples/index.md
+  - CLI Reference: reference/cli.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourname/bsot
+      name: BSOT on GitHub
+  homepage: /
+  generator: false
+
+copyright: Copyright &copy; 2025 BSOT Project

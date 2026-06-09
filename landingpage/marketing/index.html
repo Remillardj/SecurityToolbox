@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- SEO Meta -->
+  <title>BSOT - Blue Security Operations Toolkit</title>
+  <meta name="description" content="A comprehensive CLI toolkit for security analysts. Analyze phishing emails, enrich IOCs, triage malware, and more—all from your terminal.">
+  
+  <!-- Open Graph -->
+  <meta property="og:title" content="BSOT - Security Operations from Your Terminal">
+  <meta property="og:description" content="A comprehensive CLI toolkit for security analysts. Analyze phishing emails, enrich IOCs, triage malware, and more.">
+  <meta property="og:image" content="assets/og-image.png">
+  <meta property="og:type" content="website">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="BSOT - Security Operations from Your Terminal">
+  <meta name="twitter:description" content="A comprehensive CLI toolkit for security analysts.">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'cyber-cyan': '#06b6d4',
+            'cyber-violet': '#8b5cf6',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/custom.css">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-[#0f172a] bg-grid-pattern bg-gradient-radial min-h-screen text-slate-100">
+  
+  <!-- Navigation -->
+  <nav id="navbar" class="fixed top-0 left-0 right-0 z-50 nav-blur bg-transparent transition-all duration-300">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Logo -->
+        <a href="#" class="flex items-center gap-2">
+          <img src="assets/favicon.svg" alt="BSOT" class="w-8 h-8">
+          <span class="font-bold text-xl gradient-text">BSOT</span>
+        </a>
+        
+        <!-- Desktop Nav -->
+        <div class="hidden md:flex items-center gap-8">
+          <a href="#features" class="nav-link text-slate-300 hover:text-white">Features</a>
+          <a href="#modules" class="nav-link text-slate-300 hover:text-white">Modules</a>
+          <a href="#use-cases" class="nav-link text-slate-300 hover:text-white">Use Cases</a>
+          <a href="#install" class="nav-link text-slate-300 hover:text-white">Install</a>
+          <a href="https://github.com/yourusername/bsot" class="btn-secondary text-sm">
+            <i data-lucide="github" class="w-4 h-4"></i>
+            GitHub
+          </a>
+          <a href="docs/index.html" class="btn-primary text-sm">
+            Documentation
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </a>
+        </div>
+        
+        <!-- Mobile Menu Button -->
+        <button id="mobile-menu-button" class="md:hidden p-2 text-slate-300">
+          <i data-lucide="menu" class="w-6 h-6"></i>
+        </button>
+      </div>
+    </div>
+  </nav>
+  
+  <!-- Mobile Menu -->
+  <div id="mobile-menu" class="mobile-menu">
+    <div class="flex justify-between items-center mb-8">
+      <span class="font-bold text-xl gradient-text">BSOT</span>
+      <button id="mobile-menu-close" class="p-2 text-slate-300">
+        <i data-lucide="x" class="w-6 h-6"></i>
+      </button>
+    </div>
+    <a href="#features" class="mobile-menu-link">Features</a>
+    <a href="#modules" class="mobile-menu-link">Modules</a>
+    <a href="#use-cases" class="mobile-menu-link">Use Cases</a>
+    <a href="#install" class="mobile-menu-link">Install</a>
+    <div class="mt-8 flex flex-col gap-4">
+      <a href="https://github.com/yourusername/bsot" class="btn-secondary justify-center">
+        <i data-lucide="github" class="w-5 h-5"></i>
+        GitHub
+      </a>
+      <a href="docs/index.html" class="btn-primary justify-center">
+        Documentation
+        <i data-lucide="arrow-right" class="w-5 h-5"></i>
+      </a>
+    </div>
+  </div>
+
+  <!-- Hero Section -->
+  <section class="relative min-h-screen flex items-center pt-16 overflow-hidden">
+    <!-- Glow Effects -->
+    <div class="hero-glow cyan"></div>
+    <div class="hero-glow violet"></div>
+    
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <!-- Left: Text -->
+        <div class="fade-in">
+          <div class="badge mb-6">
+            <i data-lucide="shield-check" class="w-4 h-4"></i>
+            Open Source Security Toolkit
+          </div>
+          <h1 class="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 leading-tight">
+            Security Operations<br>
+            <span class="gradient-text">From Your Terminal</span>
+          </h1>
+          <p class="text-lg text-slate-400 mb-8 max-w-xl">
+            A comprehensive CLI toolkit for security analysts. Analyze phishing emails, 
+            enrich IOCs, triage malware, and more—all without leaving your terminal.
+          </p>
+          <div class="flex flex-wrap gap-4">
+            <a href="#install" class="btn-primary">
+              <i data-lucide="terminal" class="w-5 h-5"></i>
+              Get Started
+            </a>
+            <a href="docs/index.html" class="btn-secondary">
+              <i data-lucide="book-open" class="w-5 h-5"></i>
+              Documentation
+            </a>
+          </div>
+        </div>
+        
+        <!-- Right: Terminal Demo -->
+        <div class="fade-in fade-in-delay-2">
+          <div class="terminal relative">
+            <div class="terminal-header">
+              <div class="terminal-dot red"></div>
+              <div class="terminal-dot yellow"></div>
+              <div class="terminal-dot green"></div>
+              <span class="ml-2 text-slate-500 text-sm font-mono">bsot</span>
+            </div>
+            <button class="copy-btn" title="Copy command">
+              <i data-lucide="copy" class="w-4 h-4"></i>
+            </button>
+            <div class="terminal-body space-y-3">
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot phishing analyze suspicious.eml</span>
+              </div>
+              <div class="text-slate-500 text-sm">
+                <div class="text-cyan-400 mb-1">═══════════════════════════════════════════</div>
+                <div class="text-cyan-400 mb-2">  Phishing Analysis Report</div>
+                <div class="text-cyan-400 mb-2">═══════════════════════════════════════════</div>
+                <div class="mb-1"><span class="text-slate-400">Subject:</span> <span class="text-white">URGENT: Your account...</span></div>
+                <div class="mb-1"><span class="text-slate-400">From:</span> <span class="text-red-400">security@arnazon.com</span></div>
+                <div class="mb-3"><span class="text-slate-400">Date:</span> 2025-01-15 14:32:00</div>
+                <div class="text-yellow-400 mb-1">── 🚨 Suspicious Indicators ──</div>
+                <div class="text-red-400">  [HIGH] Typosquatting: arnazon.com</div>
+                <div class="text-red-400">  [HIGH] Urgency keywords in subject</div>
+                <div class="text-yellow-400">  [MED] Reply-To differs from sender</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Scroll Indicator -->
+    <div class="scroll-indicator text-slate-500">
+      <i data-lucide="chevron-down" class="w-6 h-6"></i>
+    </div>
+  </section>
+
+  <!-- Problem/Solution Section -->
+  <section class="py-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid md:grid-cols-2 gap-12">
+        <!-- Problem -->
+        <div class="card fade-in">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+              <i data-lucide="x" class="w-5 h-5 text-red-400"></i>
+            </div>
+            <h3 class="text-xl font-bold">The Problem</h3>
+          </div>
+          <ul class="space-y-3 text-slate-400">
+            <li class="flex items-start gap-2">
+              <i data-lucide="minus" class="w-5 h-5 text-red-400 mt-0.5 shrink-0"></i>
+              <span>Switching between dozens of web tools for every investigation</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="minus" class="w-5 h-5 text-red-400 mt-0.5 shrink-0"></i>
+              <span>Manually copying IOCs between different platforms</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="minus" class="w-5 h-5 text-red-400 mt-0.5 shrink-0"></i>
+              <span>No standardized workflow for common security tasks</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="minus" class="w-5 h-5 text-red-400 mt-0.5 shrink-0"></i>
+              <span>Disconnected tools that don't integrate well</span>
+            </li>
+          </ul>
+        </div>
+        
+        <!-- Solution -->
+        <div class="card card-violet fade-in fade-in-delay-1">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-full bg-cyber-cyan/20 flex items-center justify-center">
+              <i data-lucide="check" class="w-5 h-5 text-cyber-cyan"></i>
+            </div>
+            <h3 class="text-xl font-bold">The Solution</h3>
+          </div>
+          <ul class="space-y-3 text-slate-400">
+            <li class="flex items-start gap-2">
+              <i data-lucide="check" class="w-5 h-5 text-cyber-cyan mt-0.5 shrink-0"></i>
+              <span>One unified toolkit for all security operations</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="check" class="w-5 h-5 text-cyber-cyan mt-0.5 shrink-0"></i>
+              <span>Pipe outputs between commands for automation</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="check" class="w-5 h-5 text-cyber-cyan mt-0.5 shrink-0"></i>
+              <span>Consistent CLI patterns across all modules</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i data-lucide="check" class="w-5 h-5 text-cyber-cyan mt-0.5 shrink-0"></i>
+              <span>JSON output for SIEM/SOAR integration</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="py-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="section-title fade-in">
+        Built for <span class="gradient-text">Security Analysts</span>
+      </h2>
+      <p class="section-subtitle fade-in">
+        Everything you need for day-to-day security operations, in one place.
+      </p>
+      
+      <div class="grid md:grid-cols-3 gap-6">
+        <!-- Feature 1 -->
+        <div class="card fade-in">
+          <div class="w-12 h-12 rounded-lg bg-cyber-cyan/20 flex items-center justify-center mb-4">
+            <i data-lucide="mail-search" class="w-6 h-6 text-cyber-cyan"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Phishing Analysis</h3>
+          <p class="text-slate-400 text-sm">
+            Parse email headers, extract IOCs, check SPF/DKIM/DMARC, 
+            and use AI for sophisticated analysis.
+          </p>
+        </div>
+        
+        <!-- Feature 2 -->
+        <div class="card fade-in fade-in-delay-1">
+          <div class="w-12 h-12 rounded-lg bg-cyber-violet/20 flex items-center justify-center mb-4">
+            <i data-lucide="radar" class="w-6 h-6 text-cyber-violet"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Threat Intelligence</h3>
+          <p class="text-slate-400 text-sm">
+            Enrich IOCs via VirusTotal, AbuseIPDB, GreyNoise, OTX, 
+            and more—with a single command.
+          </p>
+        </div>
+        
+        <!-- Feature 3 -->
+        <div class="card fade-in fade-in-delay-2">
+          <div class="w-12 h-12 rounded-lg bg-green-500/20 flex items-center justify-center mb-4">
+            <i data-lucide="bug" class="w-6 h-6 text-green-400"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">Malware Triage</h3>
+          <p class="text-slate-400 text-sm">
+            PE analysis, YARA scanning, string extraction, 
+            deobfuscation, and sandbox submission.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Modules Grid Section -->
+  <section id="modules" class="py-20 bg-slate-900/50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="section-title fade-in">
+        12 Powerful <span class="gradient-text">Modules</span>
+      </h2>
+      <p class="section-subtitle fade-in">
+        Each module is focused on a specific security domain, 
+        with consistent patterns across all commands.
+      </p>
+      
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <!-- Modules -->
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="mail" class="w-full h-full"></i></div>
+          <div class="module-name">phishing</div>
+          <div class="module-desc">Email analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="search" class="w-full h-full"></i></div>
+          <div class="module-name">intel</div>
+          <div class="module-desc">IOC enrichment</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="file-search" class="w-full h-full"></i></div>
+          <div class="module-name">file</div>
+          <div class="module-desc">File analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="globe" class="w-full h-full"></i></div>
+          <div class="module-name">network</div>
+          <div class="module-desc">Network security</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="scroll-text" class="w-full h-full"></i></div>
+          <div class="module-name">logs</div>
+          <div class="module-desc">Log analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="binary" class="w-full h-full"></i></div>
+          <div class="module-name">data</div>
+          <div class="module-desc">Encoding/decoding</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="key-round" class="w-full h-full"></i></div>
+          <div class="module-name">auth</div>
+          <div class="module-desc">Auth analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="monitor" class="w-full h-full"></i></div>
+          <div class="module-name">system</div>
+          <div class="module-desc">System analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="siren" class="w-full h-full"></i></div>
+          <div class="module-name">ir</div>
+          <div class="module-desc">Incident response</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="bug" class="w-full h-full"></i></div>
+          <div class="module-name">malware</div>
+          <div class="module-desc">Malware analysis</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="file-text" class="w-full h-full"></i></div>
+          <div class="module-name">report</div>
+          <div class="module-desc">Case management</div>
+        </div>
+        <div class="module-card fade-in">
+          <div class="module-icon"><i data-lucide="globe-2" class="w-full h-full"></i></div>
+          <div class="module-name">osint</div>
+          <div class="module-desc">Open source intel</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use Cases Section -->
+  <section id="use-cases" class="py-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="section-title fade-in">
+        Real-World <span class="gradient-text">Use Cases</span>
+      </h2>
+      <p class="section-subtitle fade-in">
+        See how BSOT streamlines common security workflows.
+      </p>
+      
+      <div class="grid md:grid-cols-3 gap-6">
+        <!-- Use Case 1 -->
+        <div class="card fade-in">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-cyber-cyan/20 flex items-center justify-center">
+              <i data-lucide="mail-warning" class="w-5 h-5 text-cyber-cyan"></i>
+            </div>
+            <h3 class="font-semibold">Phishing Investigation</h3>
+          </div>
+          <p class="text-slate-400 text-sm mb-4">
+            Analyze suspicious emails end-to-end: parse headers, extract IOCs, 
+            check reputation, and generate reports.
+          </p>
+          <div class="terminal text-xs">
+            <div class="terminal-body py-2">
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot phishing analyze email.eml</span>
+              </div>
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot phishing extract-iocs email.eml | bsot intel bulk -f -</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Use Case 2 -->
+        <div class="card fade-in fade-in-delay-1">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-cyber-violet/20 flex items-center justify-center">
+              <i data-lucide="bug" class="w-5 h-5 text-cyber-violet"></i>
+            </div>
+            <h3 class="font-semibold">Malware Triage</h3>
+          </div>
+          <p class="text-slate-400 text-sm mb-4">
+            Quick static analysis: identify file type, check hashes, 
+            analyze PE structure, scan with YARA.
+          </p>
+          <div class="terminal text-xs">
+            <div class="terminal-body py-2">
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot file identify sample.exe</span>
+              </div>
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot malware pe sample.exe --sections</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Use Case 3 -->
+        <div class="card fade-in fade-in-delay-2">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+              <i data-lucide="siren" class="w-5 h-5 text-yellow-400"></i>
+            </div>
+            <h3 class="font-semibold">Incident Response</h3>
+          </div>
+          <p class="text-slate-400 text-sm mb-4">
+            Collect artifacts, contain threats, document findings, 
+            and generate reports—all from the CLI.
+          </p>
+          <div class="terminal text-xs">
+            <div class="terminal-body py-2">
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot ir collect --profile full</span>
+              </div>
+              <div class="terminal-line">
+                <span class="terminal-prompt">$</span>
+                <span class="terminal-command">bsot ir cf block 1.2.3.4</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Installation Section -->
+  <section id="install" class="py-20 bg-slate-900/50">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="section-title fade-in">
+        Get Started in <span class="gradient-text">Seconds</span>
+      </h2>
+      <p class="section-subtitle fade-in">
+        Install BSOT with pip and start analyzing immediately.
+      </p>
+      
+      <div class="space-y-6 fade-in">
+        <!-- Install Command -->
+        <div class="terminal relative">
+          <div class="terminal-header">
+            <div class="terminal-dot red"></div>
+            <div class="terminal-dot yellow"></div>
+            <div class="terminal-dot green"></div>
+            <span class="ml-2 text-slate-500 text-sm font-mono">install from source</span>
+          </div>
+          <button class="copy-btn" title="Copy command">
+            <i data-lucide="copy" class="w-4 h-4"></i>
+          </button>
+          <div class="terminal-body space-y-2">
+            <div class="text-slate-500 text-xs mb-2"># Install from source</div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">git clone git@github.com:Remillardj/SecurityToolbox.git</span>
+            </div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">cd SecurityToolbox</span>
+            </div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">pip install -e .</span>
+            </div>
+            <div class="text-slate-500 text-xs mt-3 mb-2"># Or install requirements manually</div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">pip install -r requirements.txt</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Quick Examples -->
+        <div class="terminal relative">
+          <div class="terminal-header">
+            <div class="terminal-dot red"></div>
+            <div class="terminal-dot yellow"></div>
+            <div class="terminal-dot green"></div>
+            <span class="ml-2 text-slate-500 text-sm font-mono">examples</span>
+          </div>
+          <div class="terminal-body space-y-2">
+            <div class="text-slate-500 text-xs mb-2"># Quick examples</div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">bsot intel enrich 8.8.8.8</span>
+            </div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">bsot file hash malware.exe --all</span>
+            </div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">bsot network ssl-check example.com</span>
+            </div>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">bsot data decode -e base64 "aGVsbG8gd29ybGQ="</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- CTA -->
+        <div class="flex flex-wrap gap-4 justify-center mt-8">
+          <a href="docs/getting-started/quick-start.html" class="btn-primary">
+            <i data-lucide="book-open" class="w-5 h-5"></i>
+            Read the Docs
+          </a>
+          <a href="https://github.com/yourusername/bsot" class="btn-secondary">
+            <i data-lucide="github" class="w-5 h-5"></i>
+            View on GitHub
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="py-20">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <h2 class="text-3xl md:text-4xl font-bold mb-6 fade-in">
+        Ready to Streamline Your<br>
+        <span class="gradient-text">Security Operations?</span>
+      </h2>
+      <p class="text-lg text-slate-400 mb-8 fade-in">
+        Join security analysts who've simplified their workflow with BSOT.
+      </p>
+      <div class="flex flex-wrap gap-4 justify-center fade-in">
+        <a href="#install" class="btn-primary text-lg">
+          <i data-lucide="download" class="w-5 h-5"></i>
+          Install BSOT
+        </a>
+        <a href="docs/index.html" class="btn-secondary text-lg">
+          Explore Documentation
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid md:grid-cols-4 gap-8 mb-8">
+        <!-- Brand -->
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <img src="assets/favicon.svg" alt="BSOT" class="w-6 h-6">
+            <span class="font-bold gradient-text">BSOT</span>
+          </div>
+          <p class="text-slate-400 text-sm">
+            Blue Security Operations Toolkit.<br>
+            Built for analysts, by analysts.
+          </p>
+        </div>
+        
+        <!-- Links: Documentation -->
+        <div>
+          <h4 class="font-semibold mb-4 text-slate-200">Documentation</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="docs/getting-started/quick-start.html" class="footer-link">Quick Start</a></li>
+            <li><a href="docs/modules/index.html" class="footer-link">Modules</a></li>
+            <li><a href="docs/use-cases/index.html" class="footer-link">Use Cases</a></li>
+            <li><a href="docs/reference/cli.html" class="footer-link">CLI Reference</a></li>
+          </ul>
+        </div>
+        
+        <!-- Links: Community -->
+        <div>
+          <h4 class="font-semibold mb-4 text-slate-200">Community</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/yourusername/bsot" class="footer-link">GitHub</a></li>
+            <li><a href="https://github.com/yourusername/bsot/issues" class="footer-link">Issues</a></li>
+            <li><a href="https://github.com/yourusername/bsot/discussions" class="footer-link">Discussions</a></li>
+            <li><a href="https://github.com/yourusername/bsot/blob/main/CONTRIBUTING.md" class="footer-link">Contributing</a></li>
+          </ul>
+        </div>
+        
+        <!-- Links: Legal -->
+        <div>
+          <h4 class="font-semibold mb-4 text-slate-200">Legal</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/yourusername/bsot/blob/main/LICENSE" class="footer-link">License (MIT)</a></li>
+            <li><a href="#" class="footer-link">Security Policy</a></li>
+          </ul>
+        </div>
+      </div>
+      
+      <div class="border-t border-slate-700 pt-8 text-center text-sm text-slate-500">
+        <p class="mb-2">© 2025 BSOT Project. Open source under MIT License.</p>
+        <p><a href="https://bluesecurityops.com" class="footer-link hover:text-cyber-cyan transition-colors">A Blue Security Ops Project</a></p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Custom JS -->
+  <script src="js/main.js"></script>
+  
+  <!-- Initialize Lucide Icons -->
+  <script>
+    lucide.createIcons();
+  </script>
+</body>
+</html>

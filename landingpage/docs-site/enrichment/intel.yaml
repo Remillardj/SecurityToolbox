@@ -1,0 +1,113 @@
+# Enrichment data for intel module documentation
+
+description: |
+  Enrich indicators of compromise (IOCs) with threat intelligence from multiple sources
+  including VirusTotal, AbuseIPDB, GreyNoise, OTX AlienVault, and IPInfo.
+
+commands:
+  enrich:
+    description: |
+      Enrich a single IOC (IP, domain, URL, or hash) with threat intelligence.
+      Queries multiple sources and provides a consolidated verdict.
+    examples:
+      - title: "Enrich IP Address"
+        code: "bsot intel enrich 8.8.8.8"
+        output: |
+          ▌ VERDICT: CLEAN
+          ▌ CONFIDENCE: 95%
+          
+          📊 Sources: 0 malicious, 0 suspicious
+          🌍 Country: United States
+          🏢 Organization: Google LLC
+          
+          VIRUSTOTAL: CLEAN
+            Detection: 0/90
+          
+          ABUSEIPDB: CLEAN
+            Abuse Score: 0%
+            Reports: 0
+      - title: "Enrich Domain"
+        code: "bsot intel enrich suspicious-domain.com"
+      - title: "Enrich File Hash"
+        code: "bsot intel enrich d41d8cd98f00b204e9800998ecf8427e"
+      - title: "JSON Output"
+        code: "bsot intel enrich 8.8.8.8 --json"
+    tips:
+      - "Supports automatic IOC type detection"
+      - "Combine with `defang` for safe IOC sharing"
+
+  bulk:
+    description: |
+      Enrich multiple IOCs from a file or stdin. Efficient for processing large IOC lists.
+    examples:
+      - title: "From File"
+        code: "bsot intel bulk -f iocs.txt"
+      - title: "With Progress Bar"
+        code: "bsot intel bulk -f iocs.txt --progress"
+      - title: "JSON Output"
+        code: "bsot intel bulk -f iocs.txt --json -o enriched.json"
+      - title: "From Stdin"
+        code: "cat iocs.txt | bsot intel bulk -f -"
+    tips:
+      - "Use `--progress` for large files to see enrichment progress"
+      - "JSON output includes full enrichment data for each IOC"
+    warnings:
+      - "Be mindful of API rate limits when enriching large lists"
+      - "Enable caching to avoid duplicate API calls"
+
+  whois:
+    description: |
+      Perform WHOIS lookup for a domain. Shows registration details, dates, and contacts.
+    examples:
+      - title: "Domain WHOIS"
+        code: "bsot intel whois example.com"
+        output: |
+          ══════════════════════════════════════════════════════════
+            WHOIS: example.com
+          ══════════════════════════════════════════════════════════
+          
+          Registrar: Example Registrar, LLC
+          Created: 1995-08-14
+          Updated: 2024-08-07
+          Expires: 2025-08-13
+          
+          Nameservers:
+            • ns1.example.com
+            • ns2.example.com
+    tips:
+      - "WHOIS data helps identify domain ownership and registration patterns"
+      - "Check creation date - recently created domains are often malicious"
+
+  geoip:
+    description: |
+      Get geolocation information for an IP address.
+    examples:
+      - title: "GeoIP Lookup"
+        code: "bsot intel geoip 8.8.8.8"
+
+  defang:
+    description: |
+      Defang an IOC to make it safe for sharing in reports and tickets.
+    examples:
+      - title: "Defang URL"
+        code: "bsot intel defang http://evil.com/malware"
+        output: "hxxp://evil[.]com/malware"
+      - title: "Defang IP"
+        code: "bsot intel defang 192.168.1.1"
+        output: "192[.]168[.]1[.]1"
+    tips:
+      - "Always defang IOCs in reports to prevent accidental clicks"
+
+  refang:
+    description: |
+      Refang a defanged IOC to make it active again for analysis.
+    examples:
+      - title: "Refang URL"
+        code: "bsot intel refang 'hxxp://evil[.]com/malware'"
+        output: "http://evil.com/malware"
+
+related:
+  - "bsot phishing extract-iocs"
+  - "bsot malware ioc"
+  - "bsot network dns"
+

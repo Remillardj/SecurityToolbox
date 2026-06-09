@@ -1,69 +1,58 @@
 #!/bin/bash
-# Build BSOT using Nuitka - Creates a single portable binary
+# Build BSOT using cx_Freeze - Creates a portable binary distribution
 #
-# This creates a true standalone binary that you can copy anywhere.
-# Startup time: ~3 seconds
-# No dependencies required on target system.
+# This creates a standalone distribution with fast startup times.
+# First run: ~1.5s, subsequent runs: ~0.04s (macOS caches libraries)
 
-echo "Building BSOT with Nuitka..."
-echo "Creating single portable binary..."
+set -e
+
+echo "🔨 Building BSOT with cx_Freeze..."
 echo ""
+
+# Ensure we're in the right directory
+cd "$(dirname "$0")"
 
 # Clean previous build
-rm -rf bsot.build bsot.dist bsot.onefile-build dist/bsot
+rm -rf build dist/bsot_cx dist/bsot
 
-# Build with Nuitka with optimizations to reduce startup time
-python3 -m nuitka \
-    --standalone \
-    --onefile \
-    --follow-imports \
-    --include-package=commands \
-    --include-package-data=commands \
-    --enable-plugin=anti-bloat \
-    --assume-yes-for-downloads \
-    --onefile-tempdir-spec='{CACHE_DIR}/{COMPANY}/{PRODUCT}/{VERSION}' \
-    --company-name=BSOT \
-    --product-name=bsot \
-    --product-version=1.0.0 \
-    --disable-ccache \
-    --output-filename=bsot \
-    --output-dir=dist \
-    bsot.py
+# Build with cx_Freeze
+python3 setup_cx.py build_exe --build-exe=dist/bsot_cx
 
 echo ""
-if [ -f "dist/bsot" ]; then
-    echo "✅ Nuitka build complete!"
-    echo "Binary location: dist/bsot"
-
+if [ -d "dist/bsot_cx" ] && [ -f "dist/bsot_cx/bsot" ]; then
+    echo "✅ Build complete!"
+    echo ""
+    
     # Optimize for macOS
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        echo ""
         echo "Optimizing for macOS..."
-        xattr -cr dist/bsot 2>/dev/null && echo "  ✅ Removed quarantine attributes"
-        codesign -s - -f dist/bsot 2>/dev/null && echo "  ✅ Codesigned binary"
+        xattr -cr dist/bsot_cx 2>/dev/null && echo "  ✅ Removed quarantine attributes"
+        codesign -s - -f dist/bsot_cx/bsot 2>/dev/null && echo "  ✅ Codesigned binary"
+        echo ""
     fi
 
     # Test the binary
-    echo ""
     echo "Testing binary..."
-    ./dist/bsot --version
+    ./dist/bsot_cx/bsot --version
+    echo ""
 
-    # Clean up build artifacts
+    # Show size
+    echo "📦 Distribution size:"
+    du -sh dist/bsot_cx
     echo ""
-    echo "Cleaning up build artifacts..."
-    rm -rf dist/bsot.dist dist/bsot.build dist/bsot.onefile-build
-    echo "  ✅ Removed temporary build files"
 
+    echo "🚀 To install:"
+    echo "   mkdir -p ~/.local/bin ~/.local/share"
+    echo "   cp -r dist/bsot_cx ~/.local/share/bsot"
+    echo "   ln -sf ~/.local/share/bsot/bsot ~/.local/bin/bsot"
     echo ""
-    echo "Test the binary:"
-    echo "  ./dist/bsot --help"
-    echo "  ./dist/bsot data base64-decode 'SGVsbG8gV29ybGQ='"
+    echo "   # Make sure ~/.local/bin is in your PATH"
+    echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
-    echo "To install globally:"
-    echo "  sudo cp dist/bsot /usr/local/bin/"
-    echo ""
-    echo "Final binary:"
-    ls -lh dist/bsot | awk '{print "  " $9 " - " $5}'
+    echo "📝 Test commands:"
+    echo "   bsot --help"
+    echo "   bsot intel cve log4j --minimal"
+    echo "   bsot data base64-decode 'SGVsbG8gV29ybGQ='"
 else
     echo "❌ Build failed! Check errors above."
     exit 1

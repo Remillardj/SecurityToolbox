@@ -1,241 +1,171 @@
 # BSOT - Blue Security Ops Toolkit
 
-## Project Complete ✅
+## Project Overview
 
-All existing security tools have been successfully integrated into a unified CLI toolkit with a modular, scalable architecture.
+A comprehensive CLI toolkit for blue team security operations. Analyze phishing emails, enrich IOCs, triage malware, investigate logs, and more—all from your terminal.
 
-## Current Project Structure
+## Project Structure
 
 ```
 SecurityToolbox/
 ├── bsot.py                          # Main CLI entry point
-│
-├── commands/                        # Command modules
-│   ├── data_commands/               # ✅ NEW: Modular structure
-│   │   ├── __init__.py
-│   │   ├── url_decode.py
-│   │   ├── base64_decode.py
-│   │   ├── hex_decode.py
-│   │   └── email_header.py
+├── bsot/                            # Core modules
+│   ├── cli.py                       # CLI with lazy loading
+│   ├── config.py                    # Configuration management
+│   ├── cache.py                     # API response caching
+│   ├── utils.py                     # Shared utilities
 │   │
-│   ├── data.py                      # Old monolithic (can be removed)
-│   ├── network.py                   # Network commands (monolithic)
-│   ├── file.py                      # File commands (monolithic)
-│   ├── auth.py                      # Auth commands (monolithic)
-│   ├── system.py                    # System commands (monolithic)
-│   ├── logs.py                      # Log commands (monolithic)
-│   │
-│   ├── *_commands/                  # Prepared for future modularization
-│   │   └── (empty, ready for migration)
-│   │
-│   └── utils/                       # Shared utilities
-│       ├── __init__.py
-│       └── log_analyzer.py          # ✅ Moved from root
+│   ├── phishing/                    # Phishing analysis
+│   ├── intel/                       # Threat intelligence & CVE search
+│   ├── file/                        # File analysis
+│   ├── network/                     # Network security
+│   ├── logs/                        # Log analysis & AI analysis
+│   ├── data/                        # Encoding/decoding
+│   ├── auth/                        # Authentication analysis
+│   ├── system/                      # System monitoring
+│   ├── ir/                          # Incident response
+│   ├── malware/                     # Malware analysis
+│   ├── report/                      # Case management & LLM client
+│   └── osint/                       # Open source intelligence
 │
-├── legacy/                          # ✅ OLD: Standalone scripts (wrappers)
-│   ├── README.md
-│   ├── overpermissive_files.py
-│   ├── hidden_process_check.py
-│   └── log_pattern_analyzer_wrapper.py
-│
-├── setup.py                         # Installation script
+├── setup.py                         # pip installation
+├── setup_cx.py                      # cx_Freeze build config
+├── build.sh                         # Build script
 ├── requirements.txt                 # Python dependencies
-├── build_binary.sh                  # Binary compilation script
-├── bsot.spec                        # PyInstaller spec file
 │
-├── README.md                        # Main documentation
-├── USAGE.md                         # Quick reference guide
-├── BUILD.md                         # Binary build instructions
-├── REORGANIZATION.md                # Architecture explanation
-└── PROJECT_SUMMARY.md               # This file
+├── landingpage/                     # Marketing & docs site
+│   ├── marketing/                   # Landing page
+│   └── docs-site/                   # MkDocs documentation
+│
+└── legacy/                          # Old standalone scripts
 ```
 
-## What We Built
+## Command Categories
 
-### 1. Unified CLI (`bsot`)
-All security tools accessible through one command:
+### Phishing Analysis (`bsot phishing`)
+- `analyze` - Full email analysis with AI
+- `headers` - Parse email headers
+- `extract-iocs` - Extract IOCs from email
+
+### Threat Intelligence (`bsot intel`)
+- `enrich` - Enrich IOCs (VirusTotal, AbuseIPDB, etc.)
+- `cve` - Search CVEs by keyword or ID
+- `whois` - Domain WHOIS lookup
+- `geoip` - IP geolocation
+- `defang/refang` - IOC defanging
+
+### Log Analysis (`bsot logs`)
+- `analyze` - Detect attack patterns
+- `timeline` - Build investigative timeline
+- `ai-analyze` - AI-powered analysis
+- `stats` - Log statistics
+- `parse` - Parse and normalize logs
+
+### File Analysis (`bsot file`)
+- `hash` - Calculate file hashes
+- `identify` - Identify file type
+- `strings` - Extract strings
+- `entropy` - Calculate entropy
+- `secrets` - Find secrets/credentials
+
+### Network Security (`bsot network`)
+- `ssl-check` - SSL/TLS analysis
+- `dns-check` - DNS security (SPF/DKIM/DMARC)
+- `headers` - HTTP security headers
+
+### Data Tools (`bsot data`)
+- `decode` - Base64/hex/URL decode
+- `encode` - Base64/hex/URL encode
+- `timestamp` - Convert timestamps
+
+### Malware Analysis (`bsot malware`)
+- `pe` - PE file analysis
+- `yara` - YARA scanning
+- `strings` - String analysis
+- `deobfuscate` - Deobfuscation
+
+### Incident Response (`bsot ir`)
+- `collect` - Collect artifacts
+- `cf` - Cloudflare containment
+
+### Case Management (`bsot case/report`)
+- `new/open/close` - Case lifecycle
+- `add-ioc/add-note` - Add evidence
+- `generate` - Generate reports
+
+## Installation
+
+### From Source (Development)
 ```bash
-bsot <category> <command> [options]
-```
-
-### 2. Six Command Categories
-
-#### File Security (`bsot file`)
-- `permissions` - Scan for overly permissive files
-- `suid-finder` - Find SUID/SGID binaries
-- `cred-scan` - Detect hardcoded credentials
-- `hash-check` - Calculate/verify file hashes
-
-#### Network Security (`bsot network`)
-- `ssl-check` - SSL/TLS certificate validation
-- `port-scan` - Port scanning
-- `web-headers` - HTTP security headers
-- `dns-lookup` - DNS security (SPF/DMARC)
-
-#### Data Analysis (`bsot data`) ✅ NOW MODULAR
-- `url-decode` - URL decoding
-- `base64-decode` - Base64 decoding
-- `hex-decode` - Hex decoding
-- `email-header` - Email header analysis
-
-#### Authentication (`bsot auth`)
-- `password-analyze` - Password strength
-- `jwt-decode` - JWT token analysis
-- `ssh-audit` - SSH config auditing
-
-#### System Monitoring (`bsot system`)
-- `process-check` - Detect suspicious processes
-
-#### Log Analysis (`bsot logs`)
-- `analyze` - Comprehensive log analysis
-
-### 3. Key Features
-
-✅ **Modular Architecture** - Data commands now in individual files
-✅ **Backward Compatible** - Legacy scripts still work
-✅ **Easy Installation** - `pip install -e .`
-✅ **Binary Compilation** - Can build standalone executables
-✅ **Consistent Interface** - All commands follow same pattern
-✅ **Your Coding Style** - Clean, documented, practical
-
-## Migration from Standalone Tools
-
-| Old Tool | New Command |
-|----------|-------------|
-| `overpermissive_files.py` | `bsot file permissions` |
-| `hidden_process_check.py` | `bsot system process-check` |
-| `log_pattern_analyzer.py` | `bsot logs analyze` |
-
-## Quick Start
-
-### Installation
-```bash
-# From source
+git clone git@github.com:Remillardj/SecurityToolbox.git
 cd SecurityToolbox
 pip install -e .
-
-# Now use as:
 bsot --help
 ```
 
-### Running Commands
+### Build Binary (Distribution)
 ```bash
-# File security
-bsot file permissions /var/www
-bsot file cred-scan . --extensions "py,js,env"
+./build.sh
 
-# Network security
-bsot network ssl-check google.com
-bsot network port-scan 192.168.1.1
-
-# Data analysis
-bsot data url-decode "Hello%20World"
-bsot data base64-decode "SGVsbG8gV29ybGQ="
-
-# Authentication
-bsot auth password-analyze "MyP@ssw0rd"
-bsot auth jwt-decode "eyJhbGc..."
-
-# System monitoring
-bsot system process-check --vt-api-key KEY
-
-# Log analysis
-bsot logs analyze /var/log/auth.log --focus brute_force
+# Install
+mkdir -p ~/.local/bin ~/.local/share
+cp -r dist/bsot_cx ~/.local/share/bsot
+ln -sf ~/.local/share/bsot/bsot ~/.local/bin/bsot
 ```
 
-### Building Binary
+## Configuration
+
+API keys via environment variables:
 ```bash
-# Quick build
-chmod +x build_binary.sh
-./build_binary.sh
-
-# Manual build
-pip install pyinstaller
-pyinstaller bsot.spec
-
-# Install globally
-sudo cp dist/bsot /usr/local/bin/
+export VIRUSTOTAL_API_KEY=your_key
+export ABUSEIPDB_API_KEY=your_key
+export ANTHROPIC_API_KEY=your_key  # For AI features
 ```
 
-## Architecture Highlights
+Or via config file: `~/.bsot/config.json`
 
-### Modular Design (In Progress)
-The `data_commands/` folder demonstrates the new architecture:
-- Each command is its own file
-- Easy to add new commands
-- Better for testing and collaboration
-- Scalable for future growth
-
-### Future Improvements
-Other categories can be modularized:
-- `network_commands/` (ssl_check.py, port_scan.py, etc.)
-- `file_commands/` (permissions.py, suid_finder.py, etc.)
-- `auth_commands/` (password_analyze.py, jwt_decode.py, etc.)
-- `system_commands/` (process_check.py)
-- `logs_commands/` (analyze.py)
-
-### Shared Utilities
-Common code lives in `commands/utils/`:
-- `log_analyzer.py` - Comprehensive log analysis engine
-
-## Dependencies
-
-```
-click>=8.0.0       # CLI framework
-requests>=2.25.0   # HTTP requests
-dnspython>=2.1.0   # DNS lookups
-```
-
-Optional:
-- `pyinstaller` - For binary compilation
-- `nuitka` - Alternative compiler (better performance)
-
-## Testing
+## Quick Examples
 
 ```bash
-# Test all command categories
-python3 bsot.py --help
-python3 bsot.py data --help
-python3 bsot.py network --help
-python3 bsot.py file --help
-python3 bsot.py auth --help
-python3 bsot.py system --help
-python3 bsot.py logs --help
+# Analyze suspicious email
+bsot phishing analyze suspicious.eml
 
-# Test specific commands
-python3 bsot.py data url-decode "test%20string"
-python3 bsot.py network ssl-check google.com
+# Search for CVEs
+bsot intel cve log4j --minimal
+bsot intel cve CVE-2021-44228 -v
+
+# Enrich an IP
+bsot intel enrich 1.2.3.4
+
+# Build log timeline
+bsot logs timeline -f auth.log --group-by session
+
+# AI-powered log analysis
+bsot logs ai-analyze -f auth.log --focus attack
+
+# Check SSL certificate
+bsot network ssl-check example.com
+
+# Decode data
+bsot data decode -e base64 "SGVsbG8gV29ybGQ="
 ```
+
+## Performance
+
+| Method | Startup Time |
+|--------|-------------|
+| `pip install -e .` | ~0.1s |
+| cx_Freeze (first run) | ~1.5s |
+| cx_Freeze (cached) | ~0.04s |
 
 ## Documentation
 
 - **README.md** - Overview and installation
-- **USAGE.md** - Command examples and quick reference
-- **BUILD.md** - Binary compilation guide
-- **REORGANIZATION.md** - Architecture explanation
-- **legacy/README.md** - Migration guide
+- **USAGE.md** - Command examples
+- **BUILD.md** - Binary build guide
+- **landingpage/docs-site/** - Full documentation
 
-## Next Steps (Optional)
+## Links
 
-1. **Complete Modularization**: Migrate remaining categories to modular structure
-2. **Remove Old Files**: Delete monolithic command files after migration
-3. **Add Tests**: Create unit tests for each command
-4. **CI/CD**: Set up automated testing and builds
-5. **Distribution**: Publish to PyPI or create release packages
-6. **More Tools**: Add additional security tools as needed
-
-## Success Metrics
-
-✅ All original tools integrated
-✅ Unified CLI interface
-✅ Modular architecture started
-✅ Binary compilation ready
-✅ Backward compatibility maintained
-✅ Documentation complete
-✅ Your coding style preserved
-
----
-
-**BSOT is ready to use!** 🎉
-
-All your existing security tools are now unified in one powerful CLI toolkit with room to grow.
+- **Website**: [bluesecurityops.com](https://bluesecurityops.com)
+- **GitHub**: [github.com/Remillardj/SecurityToolbox](https://github.com/Remillardj/SecurityToolbox)

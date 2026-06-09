@@ -1,0 +1,115 @@
+# Enrichment data for phishing module documentation
+# This file extends the auto-generated CLI docs with examples, tips, and context
+
+description: |
+  Analyze phishing emails end-to-end. Parse headers, extract IOCs, check reputation,
+  and use AI for sophisticated analysis.
+
+commands:
+  analyze:
+    description: |
+      Comprehensive phishing email analysis. Parses the email, extracts metadata,
+      identifies suspicious indicators, and provides a verdict.
+    examples:
+      - title: "Basic Analysis"
+        code: "bsot phishing analyze suspicious.eml"
+        output: |
+          ══════════════════════════════════════════════════════════
+            Phishing Analysis Report
+          ══════════════════════════════════════════════════════════
+          Subject: URGENT: Your account has been compromised
+          From: security@arnazon.com
+          Date: 2025-01-15 14:32:00
+
+          ── 🚨 Suspicious Indicators ────────────────────────────
+            [HIGH] Sender domain typosquatting: arnazon.com → amazon.com
+            [HIGH] Subject contains urgency keywords
+            [MEDIUM] Reply-To differs from From
+      - title: "JSON Output"
+        code: "bsot phishing analyze suspicious.eml --json"
+      - title: "Pipe to jq"
+        code: "bsot phishing analyze suspicious.eml --json | jq '.verdict'"
+    tips:
+      - "Use JSON output for integration with SIEM/SOAR platforms"
+      - "Combine with `extract-iocs` for IOC enrichment workflow"
+    warnings:
+      - "Be cautious when opening email files from unknown sources"
+
+  extract-iocs:
+    description: |
+      Extract all indicators of compromise (IOCs) from an email, including URLs,
+      domains, IP addresses, file hashes, and email addresses.
+    examples:
+      - title: "Extract to Text"
+        code: "bsot phishing extract-iocs email.eml"
+      - title: "Extract to JSON"
+        code: "bsot phishing extract-iocs email.eml --format json"
+      - title: "Extract and Enrich"
+        code: |
+          bsot phishing extract-iocs email.eml --format json | \
+            jq -r '.[] | select(.type == "ip" or .type == "domain") | .value' | \
+            bsot intel bulk -f -
+    tips:
+      - "Extracted IOCs can be piped directly to `bsot intel bulk` for enrichment"
+
+  headers:
+    description: |
+      Analyze email authentication headers including SPF, DKIM, and DMARC results.
+      Helps identify spoofed emails.
+    examples:
+      - title: "Header Analysis"
+        code: "bsot phishing headers email.eml"
+        output: |
+          ══════════════════════════════════════════════════════════
+            Email Authentication Analysis
+          ══════════════════════════════════════════════════════════
+
+          ── SPF ────────────────────────────────────────────────────
+            Result: fail
+            Domain: arnazon.com
+            IP: 192.168.1.50
+
+          ── DKIM ───────────────────────────────────────────────────
+            Result: none
+            Note: No DKIM signature found
+
+          ── DMARC ──────────────────────────────────────────────────
+            Result: fail
+            Policy: reject
+    tips:
+      - "SPF/DKIM/DMARC failures are strong indicators of spoofing"
+      - "Some legitimate emails may have partial failures - check all three"
+
+  ai-analyze:
+    description: |
+      Use AI (OpenAI GPT or Anthropic Claude) for sophisticated phishing analysis.
+      The AI considers context, social engineering techniques, and subtle indicators.
+    examples:
+      - title: "OpenAI Analysis"
+        code: "bsot phishing ai-analyze email.eml --provider openai"
+      - title: "Anthropic Analysis"
+        code: "bsot phishing ai-analyze email.eml --provider anthropic"
+    tips:
+      - "AI analysis catches subtle social engineering that rule-based detection misses"
+      - "Configure API keys via `bsot config set openai_api_key YOUR_KEY`"
+    warnings:
+      - "AI analysis sends email content to external APIs"
+      - "Be mindful of sensitive data in emails"
+
+  reputation:
+    description: |
+      Check the reputation of URLs or domains found in emails against threat intelligence sources.
+    examples:
+      - title: "Check URL"
+        code: "bsot phishing reputation http://suspicious-login.example.com/verify"
+      - title: "Check Domain"
+        code: "bsot phishing reputation suspicious-domain.com"
+    tips:
+      - "Defang URLs before sharing: `bsot intel defang <url>`"
+
+related:
+  - "bsot intel enrich"
+  - "bsot intel bulk"
+  - "bsot network dns"
+  - "bsot data decode -e url"
+
