@@ -94,6 +94,21 @@ def _render_status(run_obj, Colors, print_header, print_subheader):
             f"do. This investigation is INCOMPLETE; findings below are "
             f"partial.{Colors.RESET}"
         )
+    elif run_obj.stop_reason == "refusal":
+        click.echo(
+            f"  {Colors.RED}{Colors.BOLD}✗ DECLINED{Colors.RESET}"
+            f"{Colors.RED} - the model's safety classifiers declined this "
+            f"request, so the artifact was NEVER ANALYZED. This is not a "
+            f"clean verdict. Investigate by hand, or with the individual "
+            f"bsot commands.{Colors.RESET}"
+        )
+    elif run_obj.stop_reason == "max_tokens":
+        click.echo(
+            f"  {Colors.YELLOW}{Colors.BOLD}⚠ TRUNCATED{Colors.RESET}"
+            f"{Colors.YELLOW} - the model hit its token ceiling mid-response. "
+            f"This investigation is INCOMPLETE; findings below are partial."
+            f"{Colors.RESET}"
+        )
     elif run_obj.stop_reason == "error":
         click.echo(f"  {Colors.RED}{Colors.BOLD}✗ ERROR{Colors.RESET}")
         err = run_obj.error or {}
@@ -214,7 +229,15 @@ def run(name, task, max_iterations, json_output):
     #   2. findings recorded, or a call is awaiting approval -> 1, matching
     #      this codebase's convention (0 clean, 1 findings, 2 error).
     #   3. otherwise -> 0.
-    if run_obj.stop_reason == "error":
+    #   1b. stop_reason == "refusal" -> 2 as well. The artifact was never
+    #      analyzed, so exiting 0 would report "declined" as "clean" - the
+    #      one outcome this whole design exists to make impossible.
+    if run_obj.stop_reason in ("error", "refusal"):
         sys.exit(2)
     if len(run_obj.findings) or run_obj.pending_approval:
+        sys.exit(1)
+    # An incomplete run with nothing to show is not a clean bill of health:
+    # exit 1 rather than 0 so a truncated investigation can't be scripted
+    # against as a pass.
+    if run_obj.stop_reason in ("max_iterations", "max_tokens"):
         sys.exit(1)

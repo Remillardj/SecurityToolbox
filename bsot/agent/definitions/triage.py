@@ -25,7 +25,9 @@ How to work:
 1. Identify what the artifact is before deciding what to run. A file needs
    `file identify` before anything assumes it is a PE.
 2. Follow the evidence. Extract indicators, then enrich the ones that matter.
-   Do not enrich every string you find - check the budget first.
+   Do not enrich every string you find - enrichment lookups are rate-limited
+   against third-party services, so spend them on indicators that could
+   change your assessment.
 3. Record findings with `record_finding` as you go, not at the end. Every
    finding needs the command that produced it and the relevant excerpt.
 4. State what you could NOT determine. An honest gap is more useful than a

@@ -5,6 +5,7 @@ The suite must stay fast, offline, and free, so no test here reaches the API.
 
 import copy
 import json
+import os
 
 import pytest
 
@@ -804,3 +805,37 @@ class TestNextStep:
 
         with pytest.raises(RuntimeError, match="pip install anthropic"):
             provider.next_step([{"role": "user", "content": "go"}], [])
+
+
+class TestProviderStopReasonPropagates:
+    """
+    A provider that stops for a reason other than "the agent finished" must
+    not be reported as a completed run. A declined malware triage that reads
+    as a clean one is the single worst outcome this design can produce.
+    """
+
+    def _run(self, api_stop_reason):
+        from bsot.agent.runtime import AnthropicProvider
+
+        os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+        client = FakeClient(FakeResponse([], api_stop_reason))
+        provider = AnthropicProvider(client=client)
+        run = AgentRun(agent="triage", provider=provider)
+        run.execute("investigate sample.exe")
+        return run
+
+    def test_refusal_is_not_reported_as_completed(self):
+        assert self._run("refusal").stop_reason == "refusal"
+
+    def test_max_tokens_is_not_reported_as_completed(self):
+        assert self._run("max_tokens").stop_reason == "max_tokens"
+
+    def test_end_turn_is_still_completed(self):
+        assert self._run("end_turn").stop_reason == "completed"
+
+    def test_a_provider_without_the_attribute_still_completes(self):
+        """Stub providers don't report a stop reason; they must not regress."""
+        run = AgentRun(agent="triage", provider=StubProvider([]))
+        run.execute("go")
+
+        assert run.stop_reason == "completed"

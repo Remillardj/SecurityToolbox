@@ -69,6 +69,15 @@ class ToolCall:
     params: Dict[str, Any] = field(default_factory=dict)
 
 
+# Provider stop reasons meaning the run did NOT finish its work, mapped to the
+# run's own stop_reason. Anything else - end_turn, or a provider that doesn't
+# report one - means the agent genuinely stopped on its own.
+_INCOMPLETE_PROVIDER_REASONS = {
+    "refusal": "refusal",
+    "max_tokens": "max_tokens",
+}
+
+
 def _tool_for(tool_name: str, catalogue: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Look up a catalogue entry (schema + dispatch metadata) by tool name."""
     for tool in catalogue:
@@ -197,7 +206,17 @@ class AgentRun:
                 break
 
             if call is None:
-                self.stop_reason = "completed"
+                # A provider can stop for reasons that are NOT "the agent
+                # finished": the request was declined by safety classifiers,
+                # or the response hit its token ceiling mid-turn. Both come
+                # back as "no tool call" and would otherwise be reported as a
+                # clean, completed run - so a declined malware triage would
+                # read exactly like "we looked and found nothing". Providers
+                # that can distinguish these expose `last_stop_reason`;
+                # a provider without it (a test stub) is treated as completed.
+                self.stop_reason = _INCOMPLETE_PROVIDER_REASONS.get(
+                    getattr(self.provider, "last_stop_reason", None), "completed"
+                )
                 break
 
             try:
@@ -331,7 +350,10 @@ class AgentRun:
 
 
 MODEL = "claude-opus-5"
-MAX_TOKENS = 16000
+# Thinking is on by default on this model and max_tokens caps thinking plus
+# response text together, so a tight ceiling truncates mid-turn across a long
+# tool-calling run. Sized for headroom rather than the non-streaming default.
+MAX_TOKENS = 32000
 TOOL_SEARCH = {
     "type": "tool_search_tool_bm25_20251119",
     "name": "tool_search_tool_bm25",
@@ -368,6 +390,11 @@ class AnthropicProvider:
         self.model = model
         self.effort = effort
         self.max_tokens = max_tokens
+        # The API's stop_reason from the most recent turn. The loop reads this
+        # when next_step returns no tool call, so that "the classifiers
+        # declined" and "the response ran out of tokens" are not both reported
+        # as a completed run.
+        self.last_stop_reason: Optional[str] = None
         # Built on first use, not here: constructing a client at import/init
         # time would make the SDK a hard dependency of `bsot agent list`,
         # which needs no API at all. `client` is injectable so the tests can
@@ -470,8 +497,9 @@ class AnthropicProvider:
         response = self._get_client().messages.create(
             **self._build_request(messages, tools)
         )
+        self.last_stop_reason = getattr(response, "stop_reason", None)
 
-        if getattr(response, "stop_reason", None) == "refusal":
+        if self.last_stop_reason == "refusal":
             return None
 
         for block in getattr(response, "content", None) or []:

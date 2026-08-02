@@ -158,8 +158,12 @@ class TestRun:
         result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
 
         assert "TRUNCAT" in result.output.upper()
-        # A clean truncated run (no findings, nothing gated) still exits 0.
-        assert result.exit_code == 0
+        # A truncated run with nothing to show exits 1, NOT 0. Exiting 0 would
+        # let `if bsot agent run ...; then echo clean; fi` treat an
+        # investigation that never finished as a pass - the exact
+        # "incomplete reads as clean" failure this design exists to prevent.
+        # The banner above says why; the exit code must not contradict it.
+        assert result.exit_code == 1
 
     def test_json_output_parses_and_contains_stop_reason_findings_and_pending(
         self, monkeypatch
@@ -239,3 +243,38 @@ class TestRegistration:
     def test_agent_group_is_registered_on_the_root_cli(self):
         from bsot.cli import get_lazy_plugins
         assert "agent" in dict(get_lazy_plugins())
+
+
+class TestDeclinedRun:
+    """
+    A run the safety classifiers decline never analyzed the artifact. It must
+    not be reportable as a clean verdict - this is the outcome that would most
+    directly mislead an analyst about a real sample.
+    """
+
+    def _invoke(self, monkeypatch, stop_reason):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            self.stop_reason = stop_reason
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+        return CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+    def test_refusal_exits_2_and_says_it_was_never_analyzed(self, monkeypatch):
+        result = self._invoke(monkeypatch, "refusal")
+
+        assert result.exit_code == 2
+        assert "DECLINED" in result.output.upper()
+        assert "never analyzed" in result.output.lower()
+
+    def test_refusal_never_reports_completed(self, monkeypatch):
+        result = self._invoke(monkeypatch, "refusal")
+
+        assert "status: completed" not in result.output.lower()
+
+    def test_token_truncation_is_marked_and_does_not_exit_zero(self, monkeypatch):
+        result = self._invoke(monkeypatch, "max_tokens")
+
+        assert result.exit_code == 1
+        assert "TRUNCAT" in result.output.upper()
