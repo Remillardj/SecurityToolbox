@@ -25,10 +25,14 @@ def budget_status() -> Dict[str, Dict[str, Any]]:
 
 
 def estimate_duration(service: str, count: int) -> float:
-    """Seconds a batch of `count` lookups against `service` will take."""
+    """Seconds a batch of `count` lookups against `service` will take.
+
+    Assumes a fresh rate-limit window with no prior calls. If calls have already
+    consumed tokens in this window, the actual wait will be longer.
+    """
     from bsot.async_utils import SERVICE_RATE_LIMITS
 
-    limiter = SERVICE_RATE_LIMITS.get(service) or SERVICE_RATE_LIMITS["default"]
+    limiter = SERVICE_RATE_LIMITS.get(service, SERVICE_RATE_LIMITS["default"])
     if count <= limiter.burst:
         return 0.0
     return (count - limiter.burst) / limiter.requests_per_second
