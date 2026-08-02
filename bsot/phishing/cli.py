@@ -422,3 +422,166 @@ def reputation(email_file, virustotal_key, abuseipdb_key, max_iocs, json_output)
         sys.exit(1)
     sys.exit(0)
 
+
+
+@phishing.command()
+@click.argument('url', required=False)
+@click.option('--file', '-f', 'input_file', type=click.Path(exists=True),
+              help='Read URLs from a file, one per line')
+@click.option('--expand', is_flag=True,
+              help='Follow redirects to reveal the final destination')
+@click.option('--no-cache', is_flag=True, help='Bypass the local cache')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+@click.pass_context
+def url(ctx, url, input_file, expand, no_cache, json_output):
+    """
+    Analyze a URL without needing a full email.
+
+    \b
+    Checks reputation across configured sources and, with --expand, follows
+    redirects to reveal where a shortener actually lands. Accepts defanged
+    input, so a URL copied out of a ticket can be pasted straight in.
+
+    \b
+    Examples:
+        bsot phishing url "hxxp[://]suspicious[.]xyz/login"
+        bsot phishing url https://bit.ly/abc --expand
+        cat urls.txt | bsot phishing url -
+        bsot phishing url https://example.com --json
+    """
+    import json as json_lib
+    import re
+    from urllib.parse import urlparse
+
+    from .reputation import ReputationChecker
+    from ..config import config
+    from ..intel.ioc_utils import refang
+    from ..utils import Colors, print_header, print_subheader, safe
+
+    # Gather targets
+    targets = []
+    if url == '-' or (not url and not input_file):
+        targets = [line.strip() for line in sys.stdin if line.strip()]
+    elif input_file:
+        with open(input_file) as f:
+            targets = [line.strip() for line in f if line.strip()]
+    elif url:
+        targets = [url]
+
+    if not targets:
+        click.echo("Error: no URL provided.", err=True)
+        sys.exit(2)
+
+    # Analysts paste defanged URLs out of tickets; accept them.
+    targets = [refang(t) for t in targets]
+
+    # urlparse is lenient enough to accept "not a url at all" as a netloc,
+    # so the host is validated against hostname syntax rather than truthiness.
+    host_pattern = re.compile(
+        r'^(?:\[[0-9a-fA-F:]+\]|'                              # IPv6 literal
+        r'\d{1,3}(?:\.\d{1,3}){3}|'                            # IPv4
+        r'localhost|'
+        r'(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+'  # domain labels
+        r'[a-zA-Z]{2,})$'
+    )
+    for target in targets:
+        parsed = urlparse(target if '://' in target else f'http://{target}')
+        host = parsed.hostname or ''
+        if not host_pattern.match(host):
+            click.echo(f"Error: '{target}' is not a valid URL.", err=True)
+            sys.exit(2)
+
+    checker = ReputationChecker(
+        virustotal_key=config.virustotal_api_key,
+        urlscan_key=config.urlscan_api_key,
+    )
+    has_sources = bool(config.virustotal_api_key or config.urlscan_api_key)
+
+    reports = []
+    for target in targets:
+        parsed = urlparse(target if '://' in target else f'http://{target}')
+        entry = {
+            'url': target,
+            'scheme': parsed.scheme,
+            'host': parsed.hostname or '',
+            'port': parsed.port,
+            'path': parsed.path,
+            'redirects': [],
+            'final_url': None,
+            'reputation': None,
+        }
+
+        if expand:
+            import requests
+            try:
+                response = requests.get(
+                    target, timeout=15, allow_redirects=True,
+                    headers={'User-Agent': 'Mozilla/5.0 (compatible; bsot)'},
+                )
+                entry['redirects'] = [r.url for r in response.history]
+                entry['final_url'] = response.url
+                entry['status_code'] = response.status_code
+            except requests.exceptions.RequestException as e:
+                entry['expand_error'] = str(e)
+
+        if has_sources:
+            # Reputation is checked against the final destination when known,
+            # since that is what a victim actually reaches.
+            lookup_target = entry.get('final_url') or target
+            try:
+                agg = checker.check_url(lookup_target)
+                entry['reputation'] = {
+                    'verdict': agg.verdict,
+                    'max_score': agg.max_score,
+                    'sources': [r.to_dict() for r in agg.results],
+                }
+            except Exception as e:
+                entry['reputation'] = {'error': str(e)}
+
+        reports.append(entry)
+
+    if json_output:
+        click.echo(json_lib.dumps(
+            {'count': len(reports), 'results': reports}, indent=2, default=str
+        ))
+    else:
+        for entry in reports:
+            print_header(f"URL Analysis: {safe(entry['url'])}")
+            click.echo(f"  Host: {safe(entry['host'])}")
+            if entry.get('port'):
+                click.echo(f"  Port: {entry['port']}")
+            if entry['scheme'] != 'https':
+                click.echo(f"  {Colors.YELLOW}Scheme is {entry['scheme']}, not https{Colors.RESET}")
+
+            if entry['redirects']:
+                print_subheader(f"Redirect chain ({len(entry['redirects'])} hops)")
+                for hop in entry['redirects']:
+                    click.echo(f"  → {safe(hop)}")
+                click.echo(f"  {Colors.BOLD}final:{Colors.RESET} {safe(entry['final_url'] or '')}")
+            elif entry.get('final_url'):
+                click.echo(f"  No redirects (HTTP {entry.get('status_code')})")
+            elif entry.get('expand_error'):
+                click.echo(f"  {Colors.DIM}Could not expand: {entry['expand_error']}{Colors.RESET}")
+
+            reputation = entry['reputation']
+            if reputation is None:
+                click.echo()
+                click.echo(f"  {Colors.DIM}No reputation sources configured. "
+                           f"Run 'bsot config check' to see what is missing.{Colors.RESET}")
+            elif reputation.get('error'):
+                click.echo(f"  {Colors.YELLOW}Reputation lookup failed: "
+                           f"{reputation['error']}{Colors.RESET}")
+            else:
+                print_subheader('Reputation')
+                colors = {'malicious': Colors.RED + Colors.BOLD,
+                          'suspicious': Colors.YELLOW, 'clean': Colors.GREEN}
+                color = colors.get(reputation['verdict'], Colors.WHITE)
+                click.echo(f"  Verdict: {color}{reputation['verdict'].upper()}{Colors.RESET}")
+                for source in reputation['sources']:
+                    click.echo(f"    {source.get('source', '?')}: "
+                               f"{source.get('detections', 0)} detection(s)")
+            click.echo()
+
+    if any((r['reputation'] or {}).get('verdict') in ('malicious', 'suspicious')
+           for r in reports):
+        sys.exit(1)

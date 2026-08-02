@@ -67,6 +67,7 @@ echo 'source ~/.bsot-completion.zsh' >> ~/.zshrc
 | `analyze` | Full email analysis |
 | `headers` | Parse and score email headers |
 | `extract-iocs` | Pull IOCs out of an email |
+| `url` | Analyze a bare URL: reputation plus redirect expansion |
 | `reputation` | Check extracted IOCs against reputation sources |
 | `ai-analyze` | AI-assisted assessment |
 
@@ -175,6 +176,9 @@ echo 'source ~/.bsot-completion.zsh' >> ~/.zshrc
 ```bash
 # Triage a suspicious email
 bsot phishing analyze suspicious.eml
+
+# Check a URL pasted out of a ticket (defanged input is fine)
+bsot phishing url "hxxp[://]suspicious[.]xyz/login" --expand
 
 # Enrich an indicator and keep the JSON
 bsot intel enrich 1.2.3.4 --json > enrichment.json
