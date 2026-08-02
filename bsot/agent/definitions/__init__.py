@@ -2,7 +2,8 @@
 
 from typing import Dict, List
 
-from .triage import TRIAGE, AgentDefinition
+from .base import AgentDefinition
+from .triage import TRIAGE
 
 _REGISTRY: Dict[str, AgentDefinition] = {
     TRIAGE.name: TRIAGE,

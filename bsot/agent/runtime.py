@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional
 from .bridge import build_catalogue
 from .definitions import get_definition
 from .executor import CommandResult, run_command
+from .budget import build_budget_status_tool, budget_status_tool
 from .provenance import FindingLog, build_record_finding_tool, record_finding
 from .safety import RunState, Tier, frame_untrusted, requires_approval, tier_for
 
@@ -67,6 +68,12 @@ class ToolCall:
 
     name: str
     params: Dict[str, Any] = field(default_factory=dict)
+
+
+# The hand-written tools: dispatched by name in the loop, never deferred by
+# the provider, and skipped by build_tools' defer pass so a caller that passes
+# `AgentRun.tools` (which already contains them) doesn't get them twice.
+_UNDEFERRED_TOOL_NAMES = frozenset({"record_finding", "budget_status"})
 
 
 # Provider stop reasons meaning the run did NOT finish its work, mapped to the
@@ -153,7 +160,12 @@ class AgentRun:
         # cannot be) part of `catalogue` - it is appended here purely for
         # what gets shown to the provider. Dispatch still keys off the
         # catalogue-free special case in `execute()` below.
-        self.tools: List[Dict[str, Any]] = self.catalogue + [build_record_finding_tool()]
+        # The two hand-written tools. Neither is a CLI command, so neither
+        # appears in the catalogue and both must be dispatched by name.
+        self.tools: List[Dict[str, Any]] = self.catalogue + [
+            build_record_finding_tool(),
+            build_budget_status_tool(),
+        ]
         self.state = RunState()
         self.findings = FindingLog()
         # Failed record_finding attempts (validation rejected by
@@ -222,6 +234,10 @@ class AgentRun:
             try:
                 if call.name == "record_finding":
                     self._dispatch_record_finding(call, messages)
+                    continue
+
+                if call.name == "budget_status":
+                    self._dispatch_budget_status(call, messages)
                     continue
 
                 tool = _tool_for(call.name, self.catalogue)
@@ -348,6 +364,27 @@ class AgentRun:
         self.transcript.append(entry)
         messages.append({"role": "user", "content": json.dumps(result)})
 
+    def _dispatch_budget_status(
+        self, call: ToolCall, messages: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Handle a `budget_status` call.
+
+        Same shape as record_finding and for the same reasons: this result is
+        our own configuration data, not command output an adversary-authored
+        artifact could have influenced, so it is NOT framed as untrusted and
+        does NOT taint the run. A model that checks its budget before fanning
+        out must not pay for that with a gated case write afterwards.
+        """
+        result = budget_status_tool(call.params)
+
+        self.transcript.append({
+            "tool": call.name,
+            "executed": True,
+            "ok": bool(result.get("ok")),
+        })
+        messages.append({"role": "user", "content": json.dumps(result)})
+
 
 MODEL = "claude-opus-5"
 # Thinking is on by default on this model and max_tokens caps thinking plus
@@ -420,16 +457,18 @@ class AnthropicProvider:
         """
         tools: List[Dict[str, Any]] = []
         for tool in catalogue:
-            if tool.get("name") == "record_finding":
+            if tool.get("name") in _UNDEFERRED_TOOL_NAMES:
                 continue
             payload = {k: v for k, v in tool.items() if not k.startswith("_")}
             payload["defer_loading"] = True
             tools.append(payload)
-        # record_finding and the tool-search tool are both left undeferred on
-        # purpose. Beyond the design spec's reasoning, the API rejects a
-        # request in which every tool is deferred, so this is also what keeps
-        # the request valid at all.
+        # The hand-written tools and the tool-search tool are all left
+        # undeferred on purpose. Beyond the design spec's reasoning (nearly
+        # every run needs them, so paying a search round-trip to reach them is
+        # waste), the API rejects a request in which every tool is deferred,
+        # so this is also what keeps the request valid at all.
         tools.append(build_record_finding_tool())
+        tools.append(build_budget_status_tool())
         tools.append(TOOL_SEARCH)
         return tools
 

@@ -839,3 +839,85 @@ class TestProviderStopReasonPropagates:
         run.execute("go")
 
         assert run.stop_reason == "completed"
+
+
+class TestBudgetStatusDispatch:
+    """
+    budget_status is a hand-written tool like record_finding: not a CLI
+    command, so it must be dispatched by name. Its result is our own config
+    data, so it must not be framed as untrusted or taint the run - a model
+    that checks its budget must not pay for that with a gated case write.
+    """
+
+    def test_dispatches_by_name_and_returns_limits(self):
+        provider = StubProvider([
+            ToolCall(name="budget_status", params={}),
+        ])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert run.transcript[0]["tool"] == "budget_status"
+        assert run.transcript[0]["ok"] is True
+
+    def test_does_not_taint_the_run(self):
+        provider = StubProvider([
+            ToolCall(name="budget_status", params={}),
+        ])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert run.state.tainted is False
+
+    def test_result_is_not_framed_as_untrusted(self):
+        provider = StubProvider([
+            ToolCall(name="budget_status", params={}),
+        ])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert "framed_output" not in run.transcript[0]
+
+    def test_a_malformed_call_does_not_end_the_run(self):
+        """count without service is a usage error, not a crash."""
+        provider = StubProvider([
+            ToolCall(name="budget_status", params={"count": 5}),
+            ToolCall(name="budget_status", params={}),
+        ])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert run.error is None
+        assert run.stop_reason == "completed"
+        assert run.transcript[0]["ok"] is False
+        assert run.transcript[1]["ok"] is True
+
+    def test_tool_is_exposed_to_the_provider(self):
+        provider = CapturingProvider([])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        names = [tool["name"] for tool in provider.tools_seen]
+        assert "budget_status" in names
+
+    def test_provider_keeps_it_undeferred_and_unduplicated(self, monkeypatch):
+        """
+        The API rejects a request where every tool is deferred, and a model
+        that has to pay a tool-search round-trip to find its budget will
+        simply not check it.
+        """
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        run = AgentRun(agent="triage", provider=StubProvider([]))
+
+        payload = provider.build_tools(run.tools)
+        budget = [t for t in payload if t.get("name") == "budget_status"]
+
+        assert len(budget) == 1
+        assert "defer_loading" not in budget[0]

@@ -1,17 +1,6 @@
 """The triage agent: artifact in, sourced findings out."""
 
-from dataclasses import dataclass
-
-
-@dataclass
-class AgentDefinition:
-    """Everything that distinguishes one agent from another."""
-
-    name: str
-    system_prompt: str
-    effort: str = "high"
-    max_iterations: int = 40
-
+from .base import AgentDefinition
 
 TRIAGE_PROMPT = """\
 You are a blue-team triage analyst working through the BSOT toolkit.
@@ -27,7 +16,9 @@ How to work:
 2. Follow the evidence. Extract indicators, then enrich the ones that matter.
    Do not enrich every string you find - enrichment lookups are rate-limited
    against third-party services, so spend them on indicators that could
-   change your assessment.
+   change your assessment. Before fanning out across many indicators, call
+   `budget_status` to see the limits and how long the batch would take; if a
+   task is rate-bound, say so rather than appearing to hang.
 3. Record findings with `record_finding` as you go, not at the end. Every
    finding needs the command that produced it and the relevant excerpt.
 4. State what you could NOT determine. An honest gap is more useful than a
