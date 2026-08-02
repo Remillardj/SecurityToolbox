@@ -10,8 +10,9 @@ from typing import Any, Dict, List
 import click
 
 # The executor always supplies --json, so the model must not control it.
-# ("help" is not listed here: Click's auto-added --help option has
-# expose_value=False and never appears in command.params in the first place.)
+# ("help" is not listed here: Click builds the --help option on demand in
+# Command.get_params(ctx) and appends it there — it's never stored in
+# command.params, which is what this module reads.)
 EXCLUDED_PARAMS = {"json_output"}
 
 # Click type name -> JSON Schema type

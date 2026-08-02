@@ -90,6 +90,15 @@ class TestSchema:
 
         assert schema["input_schema"]["properties"]["exclude"]["type"] == "array"
 
+    def test_variadic_argument_becomes_array(self):
+        """`files` is `nargs=-1`, not `multiple=True`; both paths must map to array."""
+        from bsot.cli import get_lazy_plugins
+
+        group = dict(get_lazy_plugins())["file"]._load()
+        schema = command_to_schema(group.get_command(None, "hash"), ["file", "hash"])
+
+        assert schema["input_schema"]["properties"]["files"]["type"] == "array"
+
 
 class TestCommandPathPreservesDashes:
     def test_bulk_block_path_keeps_dash(self, catalogue):
@@ -133,6 +142,23 @@ class TestParamMetadata:
 
         assert schema["input_schema"]["properties"]["recursive"]["default"] is True
         assert schema["_params"]["recursive"]["secondary_opt"] == "--no-recursive"
+
+    def test_multi_positional_order_is_preserved(self):
+        """
+        The executor renders positional args in `_params` insertion order.
+        `data encode` declares `encoding` before `value`
+        (bsot/data/cli.py: @click.argument('encoding') then @click.argument('value'));
+        a reversed dict would silently render `bsot data encode <value> <encoding>`.
+        """
+        from bsot.cli import get_lazy_plugins
+
+        group = dict(get_lazy_plugins())["data"]._load()
+        schema = command_to_schema(group.get_command(None, "encode"), ["data", "encode"])
+
+        argument_keys = [
+            name for name, meta in schema["_params"].items() if meta["kind"] == "argument"
+        ]
+        assert argument_keys == ["encoding", "value"]
 
 
 class TestSupportsJson:
