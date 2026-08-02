@@ -81,8 +81,10 @@ def get_lazy_plugins() -> List[Tuple[str, LazyGroup]]:
 @click.option('--profile', '-p', envvar='BSOT_PROFILE', 
               help='Configuration profile to use')
 @click.option('--no-cache', is_flag=True, help='Disable caching for API calls')
+@click.option('--defang/--no-defang', default=True, show_default=True,
+              help='Defang indicators in human-readable output')
 @click.pass_context
-def cli(ctx, profile, no_cache):
+def cli(ctx, profile, no_cache, defang):
     """
     BSOT - Blue Security Ops Toolkit
     
@@ -123,6 +125,12 @@ def cli(ctx, profile, no_cache):
     ctx.ensure_object(dict)
     ctx.obj['profile'] = profile
     ctx.obj['no_cache'] = no_cache
+    ctx.obj['defang'] = defang
+
+    # Human-readable output defaults to defanged so results are safe to paste
+    # into tickets and chat. JSON output is unaffected.
+    from .utils import set_defang
+    set_defang(defang)
     
     # Load config with profile if specified
     if profile:

@@ -159,14 +159,19 @@ def refang(value: str) -> str:
         Original IOC string
     """
     result = value
-    
+
+    # Separators are normalised before the scheme rules run: `hxxp[://]` does
+    # not match a `hxxp://` rule, so replacing schemes first left the scheme
+    # itself defanged.
+    result = result.replace("[://]", "://")
+    result = result.replace("[:]//", "://")
+
     # URL schemes
     result = result.replace("hxxp://", "http://")
     result = result.replace("hxxps://", "https://")
     result = result.replace("hXXp://", "http://")
     result = result.replace("hXXps://", "https://")
-    result = result.replace("[://]", "://")
-    
+
     # Brackets around separators
     result = result.replace("[.]", ".")
     result = result.replace("[:]", ":")

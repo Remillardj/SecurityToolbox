@@ -153,8 +153,18 @@ def defang_domain(domain: str) -> str:
 
 
 def refang_url(url: str) -> str:
-    """Refang a defanged URL."""
-    return url.replace('hxxp://', 'http://').replace('hxxps://', 'https://').replace('[.]', '.')
+    """
+    Refang a defanged URL.
+
+    Handles the common separator variants as well as the plain form, so it is
+    a true inverse of safe(): hxxp[://], hxxp[:]//, hxxps://, and [.] dots.
+    """
+    result = url
+    for scheme in ('hxxps', 'hxxp'):
+        replacement = 'https' if scheme == 'hxxps' else 'http'
+        for separator in ('[://]', '[:]//', '://'):
+            result = result.replace(f'{scheme}{separator}', f'{replacement}://')
+    return result.replace('[.]', '.').replace('(.)', '.').replace('[dot]', '.')
 
 
 def refang_ip(ip: str) -> str:
@@ -202,3 +212,74 @@ import os
 
 if not sys.stdout.isatty() or os.getenv('NO_COLOR'):
     Colors.disable()
+
+
+# ---------------------------------------------------------------------------
+# Safe display of indicators
+#
+# Human-readable output is routinely pasted into tickets, chat, and email,
+# where a live URL is a click away from re-detonating a sample. Indicators are
+# therefore defanged on the way out unless the caller opts out. JSON output is
+# left intact: machine consumers need the real values.
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_URL_SCHEME = _re.compile(r'\b(https?|ftp)://', _re.IGNORECASE)
+_IPV4 = _re.compile(r'\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b')
+_DOMAIN = _re.compile(
+    r'\b((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+)'
+    r'(com|net|org|io|co|ru|cn|info|biz|xyz|top|club|online|site|shop|live|icu|'
+    r'dev|app|me|tv|cc|ws|pw|link|click|download|zip|mov|gq|tk|ml|ga|cf)\b',
+    _re.IGNORECASE,
+)
+
+# Defanging is suppressed inside these so ordinary output stays readable.
+_SAFE_HOSTS = frozenset({'localhost', '127.0.0.1', '0.0.0.0', '::1'})
+
+_defang_enabled = True
+
+
+def set_defang(enabled: bool) -> None:
+    """Enable or disable defanging of human-readable output."""
+    global _defang_enabled
+    _defang_enabled = bool(enabled)
+
+
+def defang_enabled() -> bool:
+    return _defang_enabled
+
+
+def safe(text: str) -> str:
+    """
+    Defang indicators in a string for safe display.
+
+    Rewrites URL schemes and the dots in IPv4 addresses and domains, so the
+    result cannot be clicked or resolved by accident.
+    """
+    if not _defang_enabled or not text:
+        return text
+
+    result = _URL_SCHEME.sub(lambda m: m.group(1).replace('t', 'x', 2) + '[://]', text)
+
+    def _ip(match):
+        if match.group(0) in _SAFE_HOSTS:
+            return match.group(0)
+        return '[.]'.join(match.groups())
+
+    result = _IPV4.sub(_ip, result)
+
+    def _domain(match):
+        labels = match.group(1).rstrip('.')
+        if labels.lower() in _SAFE_HOSTS:
+            return match.group(0)
+        return labels.replace('.', '[.]') + '[.]' + match.group(2)
+
+    return _DOMAIN.sub(_domain, result)
+
+
+def safe_echo(message: str = '', **kwargs):
+    """click.echo() with indicators defanged."""
+    import click
+
+    click.echo(safe(message), **kwargs)

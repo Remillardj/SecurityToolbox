@@ -110,7 +110,7 @@ def extract_iocs(email_file, include_safe, json_output):
     """
     from .email_parser import EmailParser
     from .ioc_extractor import extract_iocs_from_email, IOCExtractor
-    from ..utils import print_header, print_subheader, defang_url
+    from ..utils import print_header, print_subheader
     import json as json_lib
     
     parser = EmailParser()
@@ -133,25 +133,29 @@ def extract_iocs(email_file, include_safe, json_output):
         
         click.echo(f"  Total IOCs found: {iocs.total_count}\n")
         
+        # Indicators are defanged on the way out (see utils.safe) so the
+        # output is safe to paste into a ticket; --no-defang opts out.
+        from ..utils import safe
+
         if iocs.urls:
             print_subheader(f"URLs ({len(iocs.urls)})")
             for url in iocs.urls:
-                click.echo(f"  • {defang_url(url)}")
-        
+                click.echo(f"  • {safe(url)}")
+
         if iocs.domains:
             print_subheader(f"Domains ({len(iocs.domains)})")
             for domain in iocs.domains:
-                click.echo(f"  • {domain}")
-        
+                click.echo(f"  • {safe(domain)}")
+
         if iocs.ip_addresses:
             print_subheader(f"IP Addresses ({len(iocs.ip_addresses)})")
             for ip in iocs.ip_addresses:
-                click.echo(f"  • {ip}")
-        
+                click.echo(f"  • {safe(ip)}")
+
         if iocs.email_addresses:
             print_subheader(f"Email Addresses ({len(iocs.email_addresses)})")
             for email_addr in iocs.email_addresses:
-                click.echo(f"  • {email_addr}")
+                click.echo(f"  • {safe(email_addr)}")
         
         for hash_type, hashes in iocs.file_hashes.items():
             if hashes:
