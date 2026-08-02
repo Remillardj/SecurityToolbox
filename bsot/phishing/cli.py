@@ -3,9 +3,7 @@ CLI commands for the phishing analysis module.
 """
 
 import click
-import os
 import sys
-from pathlib import Path
 
 
 @click.group()
@@ -112,7 +110,7 @@ def extract_iocs(email_file, include_safe, json_output):
     """
     from .email_parser import EmailParser
     from .ioc_extractor import extract_iocs_from_email, IOCExtractor
-    from ..utils import Colors, print_header, print_subheader, defang_url
+    from ..utils import print_header, print_subheader, defang_url
     import json as json_lib
     
     parser = EmailParser()

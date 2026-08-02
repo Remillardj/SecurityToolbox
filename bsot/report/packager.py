@@ -8,8 +8,8 @@ import json
 import hashlib
 import zipfile
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
+from typing import Dict, Any
 from dataclasses import dataclass
 
 
@@ -155,7 +155,7 @@ class CasePackager:
         manifest = {
             'case_id': case_data.get('id', ''),
             'case_name': case_data.get('name', self.case_path.name),
-            'packaged_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'packaged_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'packaged_by': os.getenv('USER', 'unknown'),
             'exclude_samples': exclude_samples,
             'file_count': 0,
@@ -275,9 +275,6 @@ class CasePackager:
             result['valid'] = False
             result['errors'].append(f"Failed to read manifest: {e}")
             return result
-        
-        # Verify package hash
-        package_hash = self._calculate_file_hash(package_path)
         
         # Extract and verify files
         try:

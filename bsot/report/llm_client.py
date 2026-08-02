@@ -3,9 +3,8 @@ LLM Client Abstraction
 Unified interface for multiple LLM providers.
 """
 
-import json
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Dict
 from dataclasses import dataclass
 
 
@@ -64,13 +63,13 @@ class LLMClient(ABC):
 class AnthropicClient(LLMClient):
     """Anthropic Claude API client."""
     
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
+    def __init__(self, api_key: str, model: str = "claude-opus-5"):
         """
         Initialize Anthropic client.
-        
+
         Args:
             api_key: Anthropic API key
-            model: Model name (default: claude-sonnet-4-20250514)
+            model: Model name (default: claude-opus-5)
         """
         self.api_key = api_key
         self.model = model
@@ -112,17 +111,20 @@ class AnthropicClient(LLMClient):
         try:
             client = anthropic.Anthropic(api_key=self.api_key)
             
+            # Claude 4.7+ models reject temperature; response content may
+            # include thinking blocks ahead of the text block
             message = client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,
-                temperature=temperature,
                 system=system or "You are a cybersecurity incident report writer.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
             )
-            
-            content = message.content[0].text if message.content else ""
+
+            content = next(
+                (block.text for block in message.content if block.type == "text"), ""
+            )
             
             return LLMResponse(
                 content=content,
@@ -353,7 +355,7 @@ def get_llm_client(
         if api_key is None:
             api_key = config.anthropic_api_key
         if model is None:
-            model = config.get('report_llm_model', 'claude-sonnet-4-20250514')
+            model = config.get('report_llm_model', 'claude-opus-5')
         return AnthropicClient(api_key=api_key, model=model)
     
     elif provider == 'openai':

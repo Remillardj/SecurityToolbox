@@ -3,11 +3,11 @@ IOC Enricher
 Multi-source enrichment for indicators of compromise.
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .ioc_utils import IOCType, detect_ioc_type, defang
+from .ioc_utils import detect_ioc_type
 from ..config import config
 
 

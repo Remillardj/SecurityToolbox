@@ -127,7 +127,7 @@ def parse_log(file_path: str, format: str = 'auto', limit: int = None) -> List[L
                 events = list(_parse_cef(f, path.name, limit))
             else:
                 events = list(_parse_generic(f, path.name, limit))
-    except Exception as e:
+    except Exception:
         # Return empty list on error
         pass
     
@@ -296,9 +296,9 @@ def _parse_cef(f, source: str, limit: int) -> Iterator[LogEvent]:
         cef_start = line.find('CEF:')
         cef_content = line[cef_start:]
         
-        # Split by pipe
-        parts = cef_content.split('|')
-        if len(parts) >= 8:
+        # Split on unescaped pipes only; a \| is literal data within a field
+        parts = [p.replace(r'\|', '|') for p in re.split(r'(?<!\\)\|', cef_content)]
+        if len(parts) >= 7:
             event = LogEvent(
                 source=source,
                 source_type='cef',
@@ -308,26 +308,30 @@ def _parse_cef(f, source: str, limit: int) -> Iterator[LogEvent]:
                 'version': parts[0].replace('CEF:', ''),
                 'vendor': parts[1],
                 'product': parts[2],
-                'version': parts[3],
+                'device_version': parts[3],
                 'signature_id': parts[4],
                 'name': parts[5],
                 'severity': parts[6],
             }
             event.severity = parts[6]
             event.message = parts[5]
-            
-            # Parse extension fields (key=value pairs)
+
+            # Parse extension fields. A value runs until the next `key=`, so it
+            # may contain spaces; CEF escapes literal `=` and `\` with a backslash.
             if len(parts) > 7:
-                ext = parts[7]
-                for kv in re.findall(r'(\w+)=([^\s]+)', ext):
-                    event.extra[kv[0]] = kv[1]
-                    if kv[0] in ('src', 'sourceAddress'):
-                        event.source_ip = kv[1]
-                    elif kv[0] in ('dst', 'destinationAddress'):
-                        event.destination_ip = kv[1]
-                    elif kv[0] in ('suser', 'sourceUser'):
-                        event.user = kv[1]
-            
+                ext = '|'.join(parts[7:])
+                for key, value in re.findall(
+                    r'([A-Za-z][\w.]*)=((?:[^\\]|\\.)*?)(?=\s+[A-Za-z][\w.]*=|$)', ext
+                ):
+                    value = value.replace(r'\=', '=').replace(r'\\', '\\').strip()
+                    event.extra[key] = value
+                    if key in ('src', 'sourceAddress'):
+                        event.source_ip = value
+                    elif key in ('dst', 'destinationAddress'):
+                        event.destination_ip = value
+                    elif key in ('suser', 'sourceUser'):
+                        event.user = value
+
             yield event
             count += 1
 

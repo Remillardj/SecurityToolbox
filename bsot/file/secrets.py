@@ -5,7 +5,7 @@ Detect hardcoded credentials, API keys, and secrets in files.
 
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Set
 from dataclasses import dataclass, field
 
 

@@ -4,7 +4,6 @@ Identify file types by magic bytes, not extension.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
 from dataclasses import dataclass
 
 

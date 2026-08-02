@@ -98,7 +98,7 @@ def connections(suspicious, json_output):
         bsot system connections --suspicious
     """
     from .processes import ProcessAnalyzer
-    from ..utils import Colors, print_header
+    from ..utils import print_header
     
     analyzer = ProcessAnalyzer()
     
@@ -140,3 +140,233 @@ def connections(suspicious, json_output):
     
     click.echo()
 
+
+
+@system.command()
+@click.option('--user', 'user_only', is_flag=True, help='Only per-user locations (no system paths)')
+@click.option('--suspicious-only', is_flag=True, help='Only entries matching suspicious heuristics')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def persistence(user_only, suspicious_only, json_output):
+    """
+    Enumerate persistence mechanisms on this host.
+
+    \b
+    Covers launch agents/daemons and cron on macOS, systemd units and cron on
+    Linux. Entries are flagged when they run from world-writable or
+    user-writable paths, reference interpreters, or hide in temp directories.
+
+    \b
+    Examples:
+        bsot system persistence
+        bsot system persistence --suspicious-only
+        bsot system persistence --json
+    """
+    import os
+    import platform
+    import re
+    import stat as stat_mod
+    from pathlib import Path
+    from ..utils import Colors, print_header, print_subheader
+
+    system_name = platform.system()
+    entries = []
+
+    # Paths that should not host a legitimate autostart payload.
+    SUSPECT_DIRS = ('/tmp', '/var/tmp', '/private/tmp', '/dev/shm', '/Users/Shared')
+    # Matched against argv[0]'s basename only. Substring matching here produces
+    # nonsense ("ionodecache" contains "node", "SourceSync" contains "nc").
+    INTERPRETERS = frozenset({
+        'python', 'python2', 'python3', 'perl', 'ruby', 'bash', 'sh', 'zsh',
+        'dash', 'ksh', 'osascript', 'curl', 'wget', 'nc', 'ncat', 'netcat',
+        'powershell', 'pwsh', 'node', 'php', 'env',
+    })
+
+    def inspect(path: Path, kind: str, payload: str = ''):
+        """Build an entry, applying suspicion heuristics."""
+        reasons = []
+        try:
+            st = path.stat()
+            if st.st_mode & stat_mod.S_IWOTH:
+                reasons.append('world-writable definition')
+        except OSError:
+            st = None
+
+        blob = f"{payload} {path}"
+
+        # Temp-dir references: match a real path component, not a substring.
+        for d in SUSPECT_DIRS:
+            if re.search(rf'(?<![\w/]){re.escape(d)}/', blob):
+                reasons.append(f'references {d}')
+                break
+
+        # Interpreters: inspect the basename of the invoked executable only.
+        argv0 = payload.strip().split()[0] if payload.strip() else ''
+        exe = os.path.basename(argv0).lower()
+        if exe in INTERPRETERS:
+            reasons.append(f'invokes {exe}')
+
+        # Pipe-to-shell and encoded-payload patterns anywhere in the command.
+        if re.search(r'\|\s*(?:ba|z|k)?sh\b', blob):
+            reasons.append('pipes into a shell')
+        if re.search(r'\bbase64\s+(?:-d|--decode)\b|\b-[eE]ncodedCommand\b', blob):
+            reasons.append('decodes an encoded payload')
+        if re.search(r'\bcurl\b[^|]*\|', blob) or re.search(r'\bwget\b[^|]*\|', blob):
+            reasons.append('downloads and executes')
+
+        if path.name.startswith('.'):
+            reasons.append('hidden file')
+
+        entries.append({
+            'type': kind,
+            'path': str(path),
+            'payload': payload.strip()[:300],
+            'suspicious': bool(reasons),
+            'reasons': reasons,
+        })
+
+    def read_plist(path: Path) -> str:
+        """Extract ProgramArguments/Program from a plist, binary or XML."""
+        try:
+            import plistlib
+            with open(path, 'rb') as f:
+                data = plistlib.load(f)
+            args = data.get('ProgramArguments') or []
+            program = data.get('Program', '')
+            return ' '.join([program] + [str(a) for a in args]).strip()
+        except Exception:
+            try:
+                return path.read_text(errors='replace')[:300]
+            except OSError:
+                return ''
+
+    home = Path.home()
+
+    if system_name == 'Darwin':
+        launch_dirs = [
+            (home / 'Library/LaunchAgents', 'launch-agent (user)'),
+            (Path('/Library/LaunchAgents'), 'launch-agent (system)'),
+            (Path('/Library/LaunchDaemons'), 'launch-daemon'),
+        ]
+        if not user_only:
+            launch_dirs += [
+                (Path('/System/Library/LaunchAgents'), 'launch-agent (apple)'),
+                (Path('/System/Library/LaunchDaemons'), 'launch-daemon (apple)'),
+            ]
+        for d, kind in launch_dirs:
+            if user_only and 'user' not in kind:
+                continue
+            if not d.is_dir():
+                continue
+            for item in sorted(d.glob('*.plist')):
+                inspect(item, kind, read_plist(item))
+
+    elif system_name == 'Linux':
+        unit_dirs = [
+            (home / '.config/systemd/user', 'systemd (user)'),
+        ]
+        if not user_only:
+            unit_dirs += [
+                (Path('/etc/systemd/system'), 'systemd (system)'),
+                (Path('/usr/lib/systemd/system'), 'systemd (vendor)'),
+                (Path('/etc/init.d'), 'init.d'),
+            ]
+        for d, kind in unit_dirs:
+            if not d.is_dir():
+                continue
+            for item in sorted(d.glob('*')):
+                if item.is_file():
+                    try:
+                        text = item.read_text(errors='replace')
+                    except OSError:
+                        text = ''
+                    exec_line = ' '.join(
+                        line.split('=', 1)[1].strip()
+                        for line in text.splitlines()
+                        if line.strip().startswith('ExecStart')
+                    )
+                    inspect(item, kind, exec_line or text[:200])
+
+        for rc in ('/etc/rc.local',):
+            p = Path(rc)
+            if p.is_file() and not user_only:
+                try:
+                    inspect(p, 'rc.local', p.read_text(errors='replace')[:300])
+                except OSError:
+                    pass
+
+    # cron: user crontab plus system cron directories
+    try:
+        import subprocess
+        out = subprocess.run(['crontab', '-l'], capture_output=True, text=True, timeout=5)
+        if out.returncode == 0:
+            for line in out.stdout.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    cron_reasons = []
+                    # Skip the 5 schedule fields; the command follows.
+                    cmd = ' '.join(line.split()[5:]) if len(line.split()) > 5 else line
+                    cron_exe = os.path.basename(cmd.split()[0]).lower() if cmd.split() else ''
+                    if cron_exe in INTERPRETERS:
+                        cron_reasons.append(f'invokes {cron_exe}')
+                    for d in SUSPECT_DIRS:
+                        if re.search(rf'(?<![\w/]){re.escape(d)}/', line):
+                            cron_reasons.append(f'references {d}')
+                            break
+                    if re.search(r'\|\s*(?:ba|z|k)?sh\b', line):
+                        cron_reasons.append('pipes into a shell')
+                    entries.append({
+                        'type': 'crontab (user)',
+                        'path': 'crontab -l',
+                        'payload': line[:300],
+                        'suspicious': bool(cron_reasons),
+                        'reasons': cron_reasons,
+                    })
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    if not user_only:
+        for cron_dir in ('/etc/cron.d', '/etc/cron.daily', '/etc/cron.hourly', '/etc/periodic'):
+            d = Path(cron_dir)
+            if not d.is_dir():
+                continue
+            for item in sorted(d.rglob('*')):
+                if item.is_file():
+                    try:
+                        payload = item.read_text(errors='replace')[:200]
+                    except OSError:
+                        payload = ''
+                    inspect(item, 'cron', payload)
+
+    shown = [e for e in entries if e['suspicious']] if suspicious_only else entries
+    suspicious_count = sum(1 for e in entries if e['suspicious'])
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'platform': system_name,
+            'total': len(entries),
+            'suspicious': suspicious_count,
+            'entries': shown,
+        }, indent=2))
+    else:
+        print_header(f"Persistence Mechanisms ({system_name})")
+        if not shown:
+            click.echo(f"  {Colors.GREEN}Nothing found{Colors.RESET}\n")
+        else:
+            by_type = {}
+            for e in shown:
+                by_type.setdefault(e['type'], []).append(e)
+            for kind, items in sorted(by_type.items()):
+                print_subheader(f"{kind} ({len(items)})")
+                for e in items:
+                    marker = f"{Colors.RED}⚠{Colors.RESET} " if e['suspicious'] else "  "
+                    click.echo(f"  {marker}{e['path']}")
+                    if e['payload']:
+                        click.echo(f"      {Colors.DIM}{e['payload'][:160]}{Colors.RESET}")
+                    for r in e['reasons']:
+                        click.echo(f"      {Colors.YELLOW}→ {r}{Colors.RESET}")
+            click.echo()
+            click.echo(f"  {len(entries)} mechanism(s); {suspicious_count} flagged.")
+            click.echo()
+
+    if suspicious_count:
+        sys.exit(1)

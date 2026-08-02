@@ -6,7 +6,7 @@ Manages consolidated IOCs for a case.
 import json
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, asdict
 
@@ -141,7 +141,7 @@ class IOCStore:
             source=source,
             confidence=confidence,
             context=context,
-            first_seen=datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            first_seen=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             tags=tags or [],
         )
         
@@ -206,7 +206,7 @@ class IOCStore:
         import uuid as uuid_lib
         
         objects = []
-        now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
         
         for ioc in self.iocs:
             pattern = self._to_stix_pattern(ioc)

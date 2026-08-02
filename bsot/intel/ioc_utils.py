@@ -5,7 +5,7 @@ Type detection, defanging, and validation for indicators of compromise.
 
 import re
 from enum import Enum
-from typing import Optional, List
+from typing import Optional
 import ipaddress
 
 

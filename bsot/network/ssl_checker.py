@@ -5,8 +5,8 @@ Comprehensive SSL/TLS security analysis.
 
 import ssl
 import socket
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Dict, List
 from dataclasses import dataclass, field
 
 

@@ -4,10 +4,9 @@ Generates comprehensive phishing analysis reports.
 """
 
 import json
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
-from pathlib import Path
+from datetime import datetime, timezone
+from typing import Dict, List, Any
+from dataclasses import dataclass
 
 
 @dataclass
@@ -35,7 +34,7 @@ class ReportGenerator:
     """
     
     def __init__(self):
-        self.analysis_timestamp = datetime.utcnow()
+        self.analysis_timestamp = datetime.now(timezone.utc)
     
     def generate_verdict(
         self,

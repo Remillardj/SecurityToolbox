@@ -5,7 +5,6 @@ CLI commands for the intel (threat intelligence) module.
 import click
 import sys
 import json as json_lib
-from pathlib import Path
 
 
 @click.group()
@@ -36,7 +35,7 @@ def enrich(ctx, ioc, sources, json_output, output, no_cache):
     """
     from .enricher import IOCEnricher
     from .ioc_utils import detect_ioc_type, defang
-    from ..utils import Colors, print_header, print_subheader, print_finding, print_kv
+    from ..utils import Colors, print_header, print_subheader
     
     # Parse sources
     source_list = None
@@ -131,9 +130,9 @@ def enrich(ctx, ioc, sources, json_output, output, no_cache):
             elif source == 'greynoise':
                 click.echo(f"    Classification: {data.get('classification', 'unknown')}")
                 if data.get('noise'):
-                    click.echo(f"    Noise: Yes (internet background noise)")
+                    click.echo("    Noise: Yes (internet background noise)")
                 if data.get('riot'):
-                    click.echo(f"    RIOT: Yes (known good service)")
+                    click.echo("    RIOT: Yes (known good service)")
                 if data.get('actor'):
                     click.echo(f"    Actor: {data['actor']}")
             
@@ -258,7 +257,7 @@ def bulk(input_file, sources, json_output, csv_output, output, max_concurrent, p
         suspicious = [r for r in results if r.verdict == 'suspicious']
         clean = [r for r in results if r.verdict == 'clean']
         
-        click.echo(f"\n📊 Results Summary:")
+        click.echo("\n📊 Results Summary:")
         click.echo(f"  {Colors.RED}Malicious: {len(malicious)}{Colors.RESET}")
         click.echo(f"  {Colors.YELLOW}Suspicious: {len(suspicious)}{Colors.RESET}")
         click.echo(f"  {Colors.GREEN}Clean: {len(clean)}{Colors.RESET}")
@@ -291,7 +290,7 @@ def whois(domain, json_output):
         bsot intel whois evil-phishing-site.xyz --json
     """
     from .whois_client import WHOISClient
-    from ..utils import Colors, print_header, print_subheader, print_finding
+    from ..utils import print_header, print_subheader, print_finding
     
     client = WHOISClient()
     result = client.lookup(domain)
@@ -348,7 +347,7 @@ def whois(domain, json_output):
             click.echo(f"  Country: {result.registrant_country}")
     
     if result.privacy_protected:
-        click.echo(f"\n  🔒 WHOIS Privacy Protection: Enabled")
+        click.echo("\n  🔒 WHOIS Privacy Protection: Enabled")
     
     # Check suspicious characteristics
     flags = client.is_suspicious_domain(result)
@@ -590,7 +589,7 @@ def cve(query, limit, json_output, verbose, minimal):
     
     if not vulnerabilities:
         click.echo(f"No CVEs found for: {query}")
-        click.echo(f"\nTry searching manually:")
+        click.echo("\nTry searching manually:")
         click.echo(f"  • https://www.cve.org/CVERecord/SearchResults?query={quote(query)}")
         click.echo(f"  • https://nvd.nist.gov/vuln/search/results?query={quote(query)}")
         click.echo(f"  • https://github.com/advisories?query={quote(query)}")
@@ -637,21 +636,17 @@ def cve(query, limit, json_output, verbose, minimal):
         
         # Get CVSS score (try v3.1, then v3.0, then v2)
         cvss = None
-        cvss_vector = None
         metrics = cve_data.get('metrics', {})
         
         if 'cvssMetricV31' in metrics:
             cvss_data = metrics['cvssMetricV31'][0]['cvssData']
             cvss = cvss_data.get('baseScore')
-            cvss_vector = cvss_data.get('vectorString')
         elif 'cvssMetricV30' in metrics:
             cvss_data = metrics['cvssMetricV30'][0]['cvssData']
             cvss = cvss_data.get('baseScore')
-            cvss_vector = cvss_data.get('vectorString')
         elif 'cvssMetricV2' in metrics:
             cvss_data = metrics['cvssMetricV2'][0]['cvssData']
             cvss = cvss_data.get('baseScore')
-            cvss_vector = cvss_data.get('vectorString')
         
         cvss_str = f"{cvss}" if cvss else "N/A"
         

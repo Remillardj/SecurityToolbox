@@ -3,7 +3,6 @@ AbuseIPDB API Client
 """
 
 import requests
-from typing import Optional
 from dataclasses import dataclass, field
 
 from ...cache import cache

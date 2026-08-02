@@ -6,7 +6,7 @@ Password strength analysis and breach checking.
 import math
 import re
 import hashlib
-from typing import List, Dict, Any
+from typing import List
 from dataclasses import dataclass, field
 
 

@@ -5,7 +5,6 @@ CLI commands for the incident response module.
 import click
 import sys
 import json as json_lib
-from pathlib import Path
 
 
 @click.group()
@@ -145,25 +144,25 @@ def contain(block_ip, block_domain, disable_user, platform):
         print_subheader(f"Block IP: {block_ip}")
         
         if platform == 'linux':
-            click.echo(f"\n  # Block IP with iptables")
+            click.echo("\n  # Block IP with iptables")
             click.echo(f"  sudo iptables -A INPUT -s {block_ip} -j DROP")
             click.echo(f"  sudo iptables -A OUTPUT -d {block_ip} -j DROP")
-            click.echo(f"\n  # Rollback:")
+            click.echo("\n  # Rollback:")
             click.echo(f"  sudo iptables -D INPUT -s {block_ip} -j DROP")
             click.echo(f"  sudo iptables -D OUTPUT -d {block_ip} -j DROP")
         
         elif platform == 'macos':
-            click.echo(f"\n  # Block IP with pf")
+            click.echo("\n  # Block IP with pf")
             click.echo(f"  echo 'block drop from {block_ip}' | sudo pfctl -a 'bsot/block' -f -")
-            click.echo(f"  sudo pfctl -e")
-            click.echo(f"\n  # Rollback:")
-            click.echo(f"  sudo pfctl -a 'bsot/block' -F all")
+            click.echo("  sudo pfctl -e")
+            click.echo("\n  # Rollback:")
+            click.echo("  sudo pfctl -a 'bsot/block' -F all")
         
         elif platform == 'windows':
-            click.echo(f"\n  # Block IP with Windows Firewall")
+            click.echo("\n  # Block IP with Windows Firewall")
             click.echo(f"  netsh advfirewall firewall add rule name=\"BSOT Block {block_ip}\" dir=in action=block remoteip={block_ip}")
             click.echo(f"  netsh advfirewall firewall add rule name=\"BSOT Block {block_ip} Out\" dir=out action=block remoteip={block_ip}")
-            click.echo(f"\n  # Rollback:")
+            click.echo("\n  # Rollback:")
             click.echo(f"  netsh advfirewall firewall delete rule name=\"BSOT Block {block_ip}\"")
             click.echo(f"  netsh advfirewall firewall delete rule name=\"BSOT Block {block_ip} Out\"")
     
@@ -171,25 +170,25 @@ def contain(block_ip, block_domain, disable_user, platform):
         print_subheader(f"Disable User: {disable_user}")
         
         if platform == 'linux':
-            click.echo(f"\n  # Disable user account")
+            click.echo("\n  # Disable user account")
             click.echo(f"  sudo usermod -L {disable_user}")
             click.echo(f"  sudo usermod -s /usr/sbin/nologin {disable_user}")
-            click.echo(f"\n  # Kill user sessions")
+            click.echo("\n  # Kill user sessions")
             click.echo(f"  sudo pkill -u {disable_user}")
-            click.echo(f"\n  # Rollback:")
+            click.echo("\n  # Rollback:")
             click.echo(f"  sudo usermod -U {disable_user}")
             click.echo(f"  sudo usermod -s /bin/bash {disable_user}")
         
         elif platform == 'macos':
-            click.echo(f"\n  # Disable user account")
+            click.echo("\n  # Disable user account")
             click.echo(f"  sudo dscl . -create /Users/{disable_user} UserShell /usr/bin/false")
-            click.echo(f"\n  # Kill user sessions")
+            click.echo("\n  # Kill user sessions")
             click.echo(f"  sudo pkill -u {disable_user}")
         
         elif platform == 'windows':
-            click.echo(f"\n  # Disable user account")
+            click.echo("\n  # Disable user account")
             click.echo(f"  net user {disable_user} /active:no")
-            click.echo(f"\n  # Rollback:")
+            click.echo("\n  # Rollback:")
             click.echo(f"  net user {disable_user} /active:yes")
     
     click.echo()

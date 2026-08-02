@@ -337,7 +337,6 @@ def format(type, value, input_file, minify, sort_keys):
         
         elif type == 'html':
             try:
-                from html.parser import HTMLParser
                 # Basic HTML formatting - just output as-is for now
                 result = data
             except Exception as e:
@@ -350,3 +349,61 @@ def format(type, value, input_file, minify, sort_keys):
         click.echo(f"JSON parse error: {e}", err=True)
         sys.exit(1)
 
+
+
+@data.command()
+@click.argument('value', required=False)
+@click.option('--file', '-f', 'input_file', type=click.Path(exists=True), help='Read from file')
+@click.option('--depth', default=8, show_default=True, help='Maximum decode depth')
+@click.option('--steps', is_flag=True, help='Show every intermediate decode step')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def magic(value, input_file, depth, steps, json_output):
+    """
+    Auto-detect and recursively decode layered encodings.
+
+    \b
+    Tries base64, hex, URL, HTML, unicode-escape, punycode, gzip and zlib at
+    each layer, keeping whichever decode yields readable output, until nothing
+    further applies.
+
+    \b
+    Examples:
+        bsot data magic "U0dWc2JHOGdWMjl5YkdRPQ=="
+        cat encoded.txt | bsot data magic -
+        bsot data magic "$BLOB" --steps
+    """
+    from .encoders import magic_decode
+    from ..utils import Colors, print_header
+
+    if value == '-' or (not value and not input_file):
+        value = sys.stdin.read().strip()
+    elif input_file:
+        with open(input_file, 'r') as f:
+            value = f.read().strip()
+
+    if not value:
+        click.echo("Error: No input provided", err=True)
+        sys.exit(2)
+
+    found = magic_decode(value, max_depth=depth)
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'input': value,
+            'decoded': found[-1]['output'] if found else None,
+            'layers': [s['encoding'] for s in found],
+            'steps': found if steps else None,
+        }, indent=2))
+    elif not found:
+        click.echo(f"{Colors.YELLOW}No encoding detected{Colors.RESET}", err=True)
+        sys.exit(1)
+    else:
+        chain = ' -> '.join(s['encoding'] for s in found)
+        print_header(f"Magic Decode: {chain}")
+        if steps:
+            for i, step in enumerate(found, 1):
+                click.echo(f"  {Colors.CYAN}[{i}] {step['encoding']}{Colors.RESET}")
+                click.echo(f"      {step['output'][:400]}")
+            click.echo()
+        else:
+            click.echo(found[-1]['output'])

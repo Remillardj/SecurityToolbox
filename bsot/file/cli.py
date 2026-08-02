@@ -489,3 +489,217 @@ def cred_scan(path, recursive, no_recursive, include_low, json_output, quiet):
             click.echo(f"\n  {Colors.GREEN}✓ No secrets found{Colors.RESET}")
         click.echo()
 
+
+
+@file.command()
+@click.argument('directory', type=click.Path(exists=True))
+@click.option('--recursive/--no-recursive', default=True, help='Scan subdirectories (default: recursive)')
+@click.option('--group-writable', is_flag=True, help='Also report group-writable files')
+@click.option('--all', 'show_all', is_flag=True, help='Show every file, not just risky ones')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def permissions(directory, recursive, group_writable, show_all, json_output):
+    """
+    Scan for files with overly permissive permissions.
+
+    \b
+    Flags world-writable files (anyone on the host can modify them), plus
+    world-writable directories missing the sticky bit. Use --group-writable
+    to also report group-writable files.
+
+    \b
+    Examples:
+        bsot file permissions /var/www
+        bsot file permissions /etc --group-writable
+        bsot file permissions /srv --json
+    """
+    import os
+    import stat as stat_mod
+    from ..utils import Colors, print_header
+
+    root_path = Path(directory)
+    findings = []
+    scanned = 0
+    errors = 0
+
+    def classify(path, st):
+        """Return (severity, reason) for a risky mode, or None if fine."""
+        mode = st.st_mode
+        is_dir = stat_mod.S_ISDIR(mode)
+
+        if mode & stat_mod.S_IWOTH:
+            # A world-writable directory is expected for shared temp dirs, but
+            # only when the sticky bit stops users deleting each other's files.
+            if is_dir and not (mode & stat_mod.S_ISVTX):
+                return 'high', 'world-writable directory without sticky bit'
+            if not is_dir:
+                if mode & stat_mod.S_IXOTH:
+                    return 'critical', 'world-writable executable'
+                return 'high', 'world-writable file'
+        if group_writable and mode & stat_mod.S_IWGRP and not is_dir:
+            return 'medium', 'group-writable file'
+        return None
+
+    def record(path):
+        nonlocal scanned, errors
+        try:
+            st = os.lstat(path)
+        except OSError:
+            errors += 1
+            return
+        # Symlink permission bits are meaningless; the target is what matters.
+        if stat_mod.S_ISLNK(st.st_mode):
+            return
+        scanned += 1
+        verdict = classify(path, st)
+        if verdict:
+            severity, reason = verdict
+            findings.append({
+                'path': str(path),
+                'mode': oct(st.st_mode & 0o7777)[2:].rjust(4, '0'),
+                'severity': severity,
+                'reason': reason,
+                'uid': st.st_uid,
+                'gid': st.st_gid,
+            })
+        elif show_all:
+            findings.append({
+                'path': str(path),
+                'mode': oct(st.st_mode & 0o7777)[2:].rjust(4, '0'),
+                'severity': 'ok',
+                'reason': 'no issue',
+                'uid': st.st_uid,
+                'gid': st.st_gid,
+            })
+
+    if recursive:
+        for dirpath, dirnames, filenames in os.walk(root_path, onerror=lambda e: None):
+            record(Path(dirpath))
+            for name in filenames:
+                record(Path(dirpath) / name)
+    else:
+        record(root_path)
+        try:
+            for entry in root_path.iterdir():
+                record(entry)
+        except OSError:
+            errors += 1
+
+    risky = [f for f in findings if f['severity'] != 'ok']
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'directory': str(root_path),
+            'scanned': scanned,
+            'unreadable': errors,
+            'findings': findings,
+            'risky_count': len(risky),
+        }, indent=2))
+    else:
+        print_header(f"Permission Scan: {root_path}")
+        colors = {
+            'critical': Colors.RED + Colors.BOLD,
+            'high': Colors.RED,
+            'medium': Colors.YELLOW,
+            'ok': Colors.GREEN,
+        }
+        for f in findings:
+            c = colors.get(f['severity'], Colors.WHITE)
+            click.echo(f"  {c}{f['mode']}{Colors.RESET}  {f['path']}")
+            if f['severity'] != 'ok':
+                click.echo(f"          {Colors.DIM}{f['reason']}{Colors.RESET}")
+        click.echo()
+        click.echo(f"  Scanned {scanned} path(s); {len(risky)} risky.")
+        if errors:
+            click.echo(f"  {Colors.DIM}{errors} path(s) unreadable{Colors.RESET}")
+        click.echo()
+
+    if risky:
+        sys.exit(1)
+
+
+@file.command('suid-finder')
+@click.argument('directory', default='/usr/bin', type=click.Path(exists=True))
+@click.option('--known/--no-known', default=True,
+              help='Annotate binaries known to ship SUID (default: annotate)')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def suid_finder(directory, known, json_output):
+    """
+    Find SUID/SGID binaries (privilege escalation vectors).
+
+    \b
+    Examples:
+        bsot file suid-finder
+        bsot file suid-finder /usr --json
+    """
+    import os
+    import stat as stat_mod
+    from ..utils import Colors, print_header
+
+    # Binaries that legitimately ship SUID on most systems. Anything outside
+    # this set on a normal host is worth a closer look.
+    EXPECTED = {
+        'sudo', 'su', 'passwd', 'chsh', 'chfn', 'newgrp', 'gpasswd', 'mount',
+        'umount', 'ping', 'ping6', 'pkexec', 'fusermount', 'fusermount3',
+        'ksu', 'at', 'atq', 'atrm', 'batch', 'crontab', 'screen', 'wall',
+        'write', 'login', 'authopen', 'traceroute', 'traceroute6', 'quota',
+        'top', 'df', 'unix_chkpwd', 'utempter', 'expiry', 'chage',
+    }
+
+    results = []
+    for dirpath, dirnames, filenames in os.walk(directory, onerror=lambda e: None):
+        for name in filenames:
+            path = Path(dirpath) / name
+            try:
+                st = os.lstat(path)
+            except OSError:
+                continue
+            if stat_mod.S_ISLNK(st.st_mode):
+                continue
+            mode = st.st_mode
+            bits = []
+            if mode & stat_mod.S_ISUID:
+                bits.append('suid')
+            if mode & stat_mod.S_ISGID:
+                bits.append('sgid')
+            if not bits:
+                continue
+            results.append({
+                'path': str(path),
+                'name': name,
+                'bits': bits,
+                'mode': oct(mode & 0o7777)[2:].rjust(4, '0'),
+                'uid': st.st_uid,
+                'gid': st.st_gid,
+                'size': st.st_size,
+                'expected': name in EXPECTED,
+            })
+
+    unexpected = [r for r in results if not r['expected']]
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'directory': directory,
+            'count': len(results),
+            'unexpected_count': len(unexpected),
+            'binaries': results,
+        }, indent=2))
+    else:
+        print_header(f"SUID/SGID Scan: {directory}")
+        if not results:
+            click.echo(f"  {Colors.GREEN}No SUID/SGID binaries found{Colors.RESET}\n")
+        else:
+            for r in sorted(results, key=lambda x: (x['expected'], x['path'])):
+                tag = ','.join(b.upper() for b in r['bits'])
+                if known and r['expected']:
+                    marker = f"{Colors.DIM}(expected){Colors.RESET}"
+                    color = Colors.DIM
+                else:
+                    marker = f"{Colors.RED}◀ review{Colors.RESET}"
+                    color = Colors.YELLOW
+                click.echo(f"  {color}{r['mode']} {tag:9s}{Colors.RESET} {r['path']} {marker}")
+            click.echo()
+            click.echo(f"  {len(results)} SUID/SGID binary(ies); {len(unexpected)} not in the expected set.")
+            click.echo()
+
+    if unexpected:
+        sys.exit(1)

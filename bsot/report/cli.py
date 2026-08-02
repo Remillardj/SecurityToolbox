@@ -7,7 +7,7 @@ import click
 import sys
 import json as json_lib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ============================================================================
@@ -233,7 +233,7 @@ def case_add(file_path, artifact_type):
         click.echo(f"   SHA256: {artifact['hashes']['sha256'][:32]}...")
         click.echo()
         
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         click.echo(f"❌ File not found: {file_path}", err=True)
         sys.exit(1)
 
@@ -411,7 +411,7 @@ def case_status():
         click.echo(f"   Analyst: {case_obj.analyst}")
     
     # Artifacts
-    click.echo(f"\n📊 Artifacts")
+    click.echo("\n📊 Artifacts")
     if artifact_counts:
         for atype, count in artifact_counts.items():
             click.echo(f"   {atype.title()}: {count}")
@@ -419,7 +419,7 @@ def case_status():
         click.echo("   No artifacts yet")
     
     # Analysis outputs
-    click.echo(f"\n🔍 Analysis Outputs")
+    click.echo("\n🔍 Analysis Outputs")
     if output_counts:
         for otype, count in output_counts.items():
             click.echo(f"   {otype.title()} analyses: {count}")
@@ -500,7 +500,7 @@ def report_generate(template, audience, output_format, llm, no_llm, output, json
         # Save report
         reports_dir = case_obj.path / 'reports'
         reports_dir.mkdir(exist_ok=True)
-        timestamp = datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M%S')
         report_file = reports_dir / f"report-{timestamp}.md"
         report_file.write_text(content)
         
@@ -542,13 +542,13 @@ def report_generate(template, audience, output_format, llm, no_llm, output, json
     timeline = TimelineManager(case_obj.path / 'timeline.json')
     notes = NotesManager(case_obj.path / 'notes.md')
     
-    click.echo(f"\n   Analyzing case data...")
+    click.echo("\n   Analyzing case data...")
     click.echo(f"   - {case_obj.artifacts_count} artifacts")
     click.echo(f"   - {ioc_store.count()} IOCs")
     click.echo(f"   - {timeline.count()} timeline events")
     click.echo(f"   - {notes.count()} analyst notes")
     
-    click.echo(f"\n   Generating report...")
+    click.echo("\n   Generating report...")
     
     generator = ReportGenerator(case_obj, llm_client)
     result = generator.generate(
@@ -772,7 +772,7 @@ def report_package(output, exclude_samples, encrypt, password):
     click.echo(f"   Files: {result.file_count}")
     click.echo(f"   SHA256: {result.sha256[:32]}...")
     if result.encrypted:
-        click.echo(f"   Encrypted: Yes")
+        click.echo("   Encrypted: Yes")
     click.echo()
     click.echo(f"📋 Manifest: {result.manifest_path}")
     click.echo()
@@ -818,7 +818,7 @@ def report_template(action, name):
         click.echo(f"   Description: {config['description']}")
         click.echo(f"   Audience: {config['audience']}")
         click.echo(f"   Detail Level: {config['detail_level']}")
-        click.echo(f"\n   Sections:")
+        click.echo("\n   Sections:")
         for section in config['sections']:
             click.echo(f"   - {section.replace('_', ' ').title()}")
         click.echo()

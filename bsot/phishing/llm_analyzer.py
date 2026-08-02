@@ -4,7 +4,7 @@ Uses OpenAI or Anthropic APIs for intelligent phishing detection.
 """
 
 import json
-from typing import Dict, List, Any, Optional
+from typing import List
 from dataclasses import dataclass, field
 import re
 
@@ -101,16 +101,16 @@ Be thorough but avoid false positives. Consider context carefully.
         Args:
             api_key: API key for the LLM provider
             provider: "openai" or "anthropic"
-            model: Model name to use (defaults to gpt-4o or claude-3-5-sonnet)
+            model: Model name to use (defaults to gpt-4o or claude-opus-5)
         """
         self.api_key = api_key
         self.provider = provider.lower()
-        
+
         # Set default models
         if model:
             self.model = model
         elif self.provider == "anthropic":
-            self.model = "claude-sonnet-4-20250514"
+            self.model = "claude-opus-5"
         else:
             self.model = "gpt-4o"
     

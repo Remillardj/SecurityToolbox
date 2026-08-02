@@ -5,9 +5,9 @@ Manages investigation timeline for a case.
 
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 
 @dataclass
@@ -97,7 +97,7 @@ class TimelineManager:
             Created TimelineEvent
         """
         if timestamp is None:
-            timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         else:
             # Try to normalize timestamp
             timestamp = self._normalize_timestamp(timestamp)
@@ -196,7 +196,7 @@ class TimelineManager:
             if i == 0:
                 lines.append(f"  ┌─ {time_str}")
             else:
-                lines.append(f"  │")
+                lines.append("  │")
                 lines.append(f"  ├─ {time_str}")
             
             lines.append(f"  │  └── {event_text}")
@@ -262,7 +262,7 @@ class NotesManager:
             timestamp: Note timestamp (default: now)
         """
         if timestamp is None:
-            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         
         content = self.notes_file.read_text()
         

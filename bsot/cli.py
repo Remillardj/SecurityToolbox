@@ -12,24 +12,34 @@ from . import __version__
 
 class LazyGroup(click.Group):
     """Lazy-loading command group for faster startup."""
-    
-    def __init__(self, name, import_name, **attrs):
+
+    def __init__(self, name, import_name, attr=None, **attrs):
         super().__init__(name=name, **attrs)
         self._import_name = import_name
+        self._attr = attr or name
         self._impl = None
-    
+
     def _load(self):
         if self._impl is None:
-            module = importlib.import_module(self._import_name)
-            self._impl = getattr(module, self.name)
+            try:
+                module = importlib.import_module(self._import_name)
+            except ImportError as e:
+                # Name the missing dependency instead of letting the module look
+                # unimplemented — an optional extra is the usual cause.
+                raise click.ClickException(
+                    f"The '{self.name}' module could not be loaded: {e}\n"
+                    f"It may need an optional dependency. Try: "
+                    f"pip install 'bsot[full]'  (or [malware] / [report])"
+                ) from e
+            self._impl = getattr(module, self._attr)
         return self._impl
-    
+
     def get_command(self, ctx, cmd_name):
         return self._load().get_command(ctx, cmd_name)
-    
+
     def list_commands(self, ctx):
         return self._load().list_commands(ctx)
-    
+
     def invoke(self, ctx):
         return self._load().invoke(ctx)
 
@@ -40,23 +50,27 @@ def get_lazy_plugins() -> List[Tuple[str, LazyGroup]]:
     Modules only load when actually invoked.
     """
     modules = [
-        ('phishing', 'bsot.phishing.cli'),
-        ('intel', 'bsot.intel.cli'),
-        ('file', 'bsot.file.cli'),
-        ('network', 'bsot.network.cli'),
-        ('logs', 'bsot.logs.cli'),
-        ('data', 'bsot.data.cli'),
-        ('auth', 'bsot.auth.cli'),
-        ('system', 'bsot.system.cli'),
-        ('ir', 'bsot.ir.cli'),
-        ('malware', 'bsot.malware.cli'),
+        ('phishing', 'bsot.phishing.cli', 'phishing', 'Phishing email analysis tools'),
+        ('intel', 'bsot.intel.cli', 'intel', 'Threat intelligence lookups'),
+        ('file', 'bsot.file.cli', 'file', 'File analysis and forensics'),
+        ('network', 'bsot.network.cli', 'network', 'Network security tools'),
+        ('logs', 'bsot.logs.cli', 'logs', 'Log analysis utilities'),
+        ('data', 'bsot.data.cli', 'data', 'Data encoding/decoding utilities'),
+        ('auth', 'bsot.auth.cli', 'auth', 'Authentication analysis'),
+        ('system', 'bsot.system.cli', 'system', 'System monitoring tools'),
+        ('ir', 'bsot.ir.cli', 'ir', 'Incident response tools'),
+        ('malware', 'bsot.malware.cli', 'malware', 'Malware static analysis tools'),
+        # The report module exposes two groups from one module.
+        ('case', 'bsot.report.cli', 'case', 'Investigation case management'),
+        ('report', 'bsot.report.cli', 'report', 'Report generation and export'),
+        ('osint', 'bsot.osint.cli', 'osint', 'Open Source Intelligence tools'),
     ]
-    
+
     plugins = []
-    for name, import_path in modules:
-        lazy = LazyGroup(name, import_path, help=f"{name.title()} module")
+    for name, import_path, attr, help_text in modules:
+        lazy = LazyGroup(name, import_path, attr=attr, help=help_text)
         plugins.append((name, lazy))
-    
+
     return plugins
 
 
@@ -119,38 +133,6 @@ for name, group in get_lazy_plugins():
     cli.add_command(group, name=name)
 
 
-# Manually register report module commands (case + report)
-# The report module has both 'case' and 'report' command groups
-try:
-    from .report.cli import case as case_group, report as report_group
-    cli.add_command(case_group, name='case')
-    cli.add_command(report_group, name='report')
-except ImportError:
-    pass  # Module not installed
-
-
-# Manually register OSINT module
-try:
-    from .osint.cli import osint as osint_group
-    cli.add_command(osint_group, name='osint')
-except ImportError:
-    pass  # Module not installed
-
-
-# Fallback: Register placeholder groups for modules not yet implemented
-# These will be overwritten by actual implementations when they exist
-_placeholder_modules = ['file', 'network', 'data', 'auth', 'system', 'logs', 'intel', 'malware', 'ir', 'report', 'case', 'osint']
-
-for module_name in _placeholder_modules:
-    # Check if already registered via auto-discovery
-    if module_name not in [cmd.name for cmd in cli.commands.values()]:
-        # Create placeholder
-        @cli.group(name=module_name)
-        def _placeholder():
-            """Module not yet implemented."""
-            pass
-
-
 # Config management commands
 @cli.group()
 def config():
@@ -167,7 +149,7 @@ def config_show(profile, show_keys):
     
     cfg = get_config(profile)
     
-    click.echo(f"\n📋 BSOT Configuration")
+    click.echo("\n📋 BSOT Configuration")
     if profile:
         click.echo(f"   Profile: {profile}")
     click.echo()
@@ -232,7 +214,7 @@ def cache_stats():
     from .cache import cache
     
     stats = cache.stats()
-    click.echo(f"\n📊 Cache Statistics")
+    click.echo("\n📊 Cache Statistics")
     click.echo(f"   Total entries: {stats['total_entries']}")
     click.echo(f"   Total size: {stats['total_size_bytes'] / 1024:.1f} KB")
     click.echo()

@@ -3,12 +3,14 @@ Caching layer for BSOT.
 File-based cache with TTL support for API responses.
 """
 
-import json
+import functools
 import hashlib
+import inspect
+import json
+import os
 import time
 from pathlib import Path
 from typing import Optional, Any, Dict
-from datetime import datetime
 
 
 class CacheManager:
@@ -44,6 +46,10 @@ class CacheManager:
         """
         self.cache_dir = cache_dir or self.CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(self.cache_dir, 0o700)
+        except OSError:
+            pass
     
     def _get_cache_key(self, service: str, query: str) -> str:
         """Generate cache key from service and query."""
@@ -125,7 +131,9 @@ class CacheManager:
         try:
             with open(cache_path, 'w') as f:
                 json.dump(cache_data, f, default=str)
-        except (IOError, TypeError) as e:
+            # Cached lookups can contain investigation data; keep them private.
+            os.chmod(cache_path, 0o600)
+        except (IOError, TypeError, OSError):
             # Failed to write cache, not fatal
             pass
     
@@ -193,25 +201,33 @@ def cached(service: str, ttl_hours: int = None):
             ...
     """
     def decorator(func):
+        # Bound methods pass `self` first; the cache key is the argument after it.
+        params = list(inspect.signature(func).parameters)
+        key_index = 1 if params and params[0] in ('self', 'cls') else 0
+
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # Get the query key (first non-self argument)
-            query = args[0] if args else kwargs.get(list(kwargs.keys())[0] if kwargs else '')
-            
-            # Check cache
-            if not kwargs.get('no_cache', False):
+            no_cache = kwargs.pop('no_cache', False)
+
+            if len(args) > key_index:
+                query = args[key_index]
+            elif params and len(params) > key_index:
+                query = kwargs.get(params[key_index])
+            else:
+                query = None
+
+            if query is not None and not no_cache:
                 cached_result = cache.get(service, str(query))
                 if cached_result is not None:
                     return cached_result
-            
-            # Call function
+
             result = func(*args, **kwargs)
-            
-            # Cache result
-            if result is not None and isinstance(result, dict):
+
+            if query is not None and isinstance(result, dict):
                 cache.set(service, str(query), result, ttl_hours)
-            
+
             return result
-        
+
         return wrapper
     return decorator
 

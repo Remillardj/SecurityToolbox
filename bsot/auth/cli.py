@@ -192,3 +192,194 @@ def jwt_decode(token, verify, json_output):
     if result.is_expired or result.vulnerabilities:
         sys.exit(1)
 
+
+
+# Effective sshd configuration is what matters: an absent directive still has
+# a value. Each entry is (default, checker) where checker returns a finding.
+_SSHD_DEFAULTS = {
+    'permitrootlogin': 'prohibit-password',
+    'passwordauthentication': 'yes',
+    'permitemptypasswords': 'no',
+    'pubkeyauthentication': 'yes',
+    'x11forwarding': 'no',
+    'protocol': '2',
+    'maxauthtries': '6',
+    'logingracetime': '120',
+    'clientaliveinterval': '0',
+    'usepam': 'yes',
+    'allowtcpforwarding': 'yes',
+    'gatewayports': 'no',
+    'hostbasedauthentication': 'no',
+    'ignorerhosts': 'yes',
+    'strictmodes': 'yes',
+}
+
+
+def _audit_sshd(config: dict) -> list:
+    """Evaluate effective sshd settings, returning findings."""
+    findings = []
+
+    def effective(key):
+        return config.get(key, _SSHD_DEFAULTS.get(key, ''))
+
+    def add(severity, setting, value, message, explicit):
+        findings.append({
+            'severity': severity,
+            'setting': setting,
+            'value': value,
+            'message': message,
+            'source': 'config' if explicit else 'default',
+        })
+
+    root = effective('permitrootlogin')
+    if root == 'yes':
+        add('critical', 'PermitRootLogin', root,
+            'Direct root login with a password is permitted',
+            'permitrootlogin' in config)
+    elif root in ('prohibit-password', 'without-password', 'forced-commands-only', 'no'):
+        add('ok', 'PermitRootLogin', root, 'Root login is restricted',
+            'permitrootlogin' in config)
+
+    if effective('permitemptypasswords') == 'yes':
+        add('critical', 'PermitEmptyPasswords', 'yes',
+            'Accounts with empty passwords can log in',
+            'permitemptypasswords' in config)
+
+    pw = effective('passwordauthentication')
+    if pw == 'yes':
+        add('high', 'PasswordAuthentication', 'yes',
+            'Password authentication is enabled (brute-force exposure); '
+            'prefer key-based authentication',
+            'passwordauthentication' in config)
+    else:
+        add('ok', 'PasswordAuthentication', pw, 'Password authentication is disabled',
+            'passwordauthentication' in config)
+
+    if effective('hostbasedauthentication') == 'yes':
+        add('high', 'HostbasedAuthentication', 'yes',
+            'Host-based authentication trusts the client host',
+            'hostbasedauthentication' in config)
+
+    if effective('ignorerhosts') == 'no':
+        add('high', 'IgnoreRhosts', 'no', '.rhosts files are honored',
+            'ignorerhosts' in config)
+
+    if effective('protocol') == '1':
+        add('critical', 'Protocol', '1', 'SSH protocol 1 is cryptographically broken',
+            'protocol' in config)
+
+    if effective('permituserenvironment') == 'yes':
+        add('medium', 'PermitUserEnvironment', 'yes',
+            'Users can set environment variables, aiding privilege escalation',
+            'permituserenvironment' in config)
+
+    try:
+        tries = int(effective('maxauthtries'))
+        if tries > 6:
+            add('medium', 'MaxAuthTries', str(tries),
+                'High authentication attempt limit aids brute-forcing',
+                'maxauthtries' in config)
+    except ValueError:
+        pass
+
+    if effective('x11forwarding') == 'yes':
+        add('low', 'X11Forwarding', 'yes', 'X11 forwarding is enabled; disable if unused',
+            'x11forwarding' in config)
+
+    if effective('strictmodes') == 'no':
+        add('medium', 'StrictModes', 'no',
+            'Ownership/permission checks on user key files are disabled',
+            'strictmodes' in config)
+
+    if effective('gatewayports') == 'yes':
+        add('medium', 'GatewayPorts', 'yes',
+            'Forwarded ports are exposed to other hosts',
+            'gatewayports' in config)
+
+    if 'port' in config and config['port'] != '22':
+        add('info', 'Port', config['port'],
+            'Non-default port (obscurity only, not a control)', True)
+
+    if 'allowusers' in config or 'allowgroups' in config:
+        add('ok', 'AllowUsers/AllowGroups',
+            config.get('allowusers', config.get('allowgroups', '')),
+            'Login is restricted to an explicit allow-list', True)
+
+    return findings
+
+
+@auth.command('ssh-audit')
+@click.argument('config_file', required=False, type=click.Path(exists=True))
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def ssh_audit(config_file, json_output):
+    """
+    Audit an sshd configuration for security issues.
+
+    \b
+    Settings absent from the file are evaluated at their OpenSSH default,
+    so a missing PasswordAuthentication is still reported as enabled.
+
+    \b
+    Examples:
+        bsot auth ssh-audit
+        bsot auth ssh-audit /etc/ssh/sshd_config
+        bsot auth ssh-audit sshd_config --json
+    """
+    import os
+    from ..utils import Colors, print_header
+
+    if not config_file:
+        for candidate in ('/etc/ssh/sshd_config', '/etc/sshd_config'):
+            if os.path.exists(candidate):
+                config_file = candidate
+                break
+        if not config_file:
+            click.echo("Error: no sshd_config found; pass one explicitly.", err=True)
+            sys.exit(2)
+
+    config = {}
+    try:
+        with open(config_file, 'r', errors='replace') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    key, value = parts
+                    # First occurrence wins in sshd, unlike most config formats.
+                    config.setdefault(key.lower(), value.strip().lower())
+    except OSError as e:
+        click.echo(f"Error: could not read {config_file}: {e}", err=True)
+        sys.exit(2)
+
+    findings = _audit_sshd(config)
+    issues = [f for f in findings if f['severity'] not in ('ok', 'info')]
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'config_file': config_file,
+            'findings': findings,
+            'issue_count': len(issues),
+        }, indent=2))
+    else:
+        print_header(f"SSH Audit: {config_file}")
+        colors = {
+            'critical': Colors.RED + Colors.BOLD,
+            'high': Colors.RED,
+            'medium': Colors.YELLOW,
+            'low': Colors.BLUE,
+            'info': Colors.CYAN,
+            'ok': Colors.GREEN,
+        }
+        for f in sorted(findings, key=lambda x: ['critical', 'high', 'medium', 'low', 'info', 'ok'].index(x['severity'])):
+            c = colors.get(f['severity'], Colors.WHITE)
+            src = '' if f['source'] == 'config' else f" {Colors.DIM}(sshd default){Colors.RESET}"
+            click.echo(f"  {c}[{f['severity'].upper()}]{Colors.RESET} {f['setting']} = {f['value']}{src}")
+            click.echo(f"        {Colors.DIM}{f['message']}{Colors.RESET}")
+        click.echo()
+        click.echo(f"  {len(issues)} issue(s) found.")
+        click.echo()
+
+    if issues:
+        sys.exit(1)

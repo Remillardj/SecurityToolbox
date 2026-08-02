@@ -5,7 +5,7 @@ Multi-algorithm file hashing with streaming support.
 
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Optional, BinaryIO
+from typing import Dict, List, BinaryIO
 from dataclasses import dataclass, field
 
 

@@ -6,7 +6,7 @@ Decode and analyze JSON Web Tokens.
 import base64
 import json
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass, field
 
 

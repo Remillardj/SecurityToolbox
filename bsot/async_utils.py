@@ -4,11 +4,11 @@ Provides concurrent execution for bulk operations with rate limiting.
 """
 
 import asyncio
+import threading
 import time
-from typing import List, Callable, Any, Dict, Optional, TypeVar, Awaitable
+from typing import List, Callable, Any, Dict, TypeVar, Awaitable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 T = TypeVar('T')
 
@@ -16,50 +16,84 @@ T = TypeVar('T')
 @dataclass
 class RateLimiter:
     """
-    Token bucket rate limiter.
-    
+    Token bucket rate limiter, safe to share across threads and event loops.
+
+    A single limiter instance governs the aggregate rate for a service, so N
+    concurrent workers sharing it still make at most `requests_per_second`
+    requests per second combined.
+
     Attributes:
         requests_per_second: Maximum requests per second
         burst: Maximum burst size (default: same as requests_per_second)
     """
     requests_per_second: float
     burst: int = None
-    
+
     _tokens: float = field(default=0, init=False)
     _last_update: float = field(default=0, init=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
-    
+    _thread_lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    # asyncio.Lock binds to the running loop, so one is created per loop rather
+    # than at import time (a module-level lock breaks on a second asyncio.run).
+    _async_locks: dict = field(default_factory=dict, init=False)
+
     def __post_init__(self):
         if self.burst is None:
             self.burst = max(1, int(self.requests_per_second))
-        self._tokens = self.burst
+        self._tokens = float(self.burst)
         self._last_update = time.monotonic()
-    
+
+    def _take(self) -> float:
+        """Consume a token, returning how long the caller must wait first."""
+        now = time.monotonic()
+        self._tokens = min(
+            self.burst,
+            self._tokens + (now - self._last_update) * self.requests_per_second,
+        )
+        self._last_update = now
+
+        self._tokens -= 1
+        if self._tokens < 0:
+            # Debt is repaid by waiting; tokens stay negative so concurrent
+            # callers queue behind each other instead of all sleeping the same
+            # interval and then firing at once.
+            return -self._tokens / self.requests_per_second
+        return 0.0
+
+    def _async_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        lock = self._async_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._async_locks[loop] = lock
+        return lock
+
     async def acquire(self):
         """Acquire a token, waiting if necessary."""
-        async with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_update
-            self._tokens = min(self.burst, self._tokens + elapsed * self.requests_per_second)
-            self._last_update = now
-            
-            if self._tokens < 1:
-                wait_time = (1 - self._tokens) / self.requests_per_second
-                await asyncio.sleep(wait_time)
-                self._tokens = 0
-            else:
-                self._tokens -= 1
+        async with self._async_lock():
+            with self._thread_lock:
+                wait = self._take()
+        # Sleep outside the lock so other callers can compute their own slot.
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+    def acquire_sync(self):
+        """Blocking form of acquire() for thread-pool callers."""
+        with self._thread_lock:
+            wait = self._take()
+        if wait > 0:
+            time.sleep(wait)
 
 
-# Per-service rate limiters
+# Per-service rate limiters. Values are documented free-tier ceilings; paid
+# tiers are higher, but limiting conservatively is the safe default.
 SERVICE_RATE_LIMITS = {
-    'virustotal': RateLimiter(4),      # 4 req/sec (free tier)
-    'abuseipdb': RateLimiter(5),       # 5 req/sec
-    'greynoise': RateLimiter(10),      # 10 req/sec
-    'otx': RateLimiter(5),             # 5 req/sec
-    'urlscan': RateLimiter(2),         # 2 req/sec
-    'ipinfo': RateLimiter(10),         # 10 req/sec
-    'default': RateLimiter(10),        # Default rate limit
+    'virustotal': RateLimiter(4 / 60, burst=4),   # 4 req/MINUTE (public API)
+    'abuseipdb': RateLimiter(1),                  # ~1 req/sec (1k/day free tier)
+    'greynoise': RateLimiter(1),                  # community API ~1 req/sec
+    'otx': RateLimiter(5),                        # 5 req/sec
+    'urlscan': RateLimiter(2),                    # 2 req/sec
+    'ipinfo': RateLimiter(10),                    # 10 req/sec
+    'default': RateLimiter(10),                   # Default rate limit
 }
 
 
@@ -121,7 +155,7 @@ class BulkExecutor:
         # Create progress bar if requested
         if self.show_progress:
             try:
-                from rich.progress import Progress, TaskID
+                from rich.progress import Progress
                 with Progress() as progress:
                     task = progress.add_task("Processing...", total=len(items))
                     
@@ -166,8 +200,9 @@ class BulkExecutor:
         def process_item(item):
             nonlocal completed
             try:
-                # Simple rate limiting for sync (time-based)
-                time.sleep(1 / self.rate_limiter.requests_per_second)
+                # Shared token bucket: the aggregate rate across all workers
+                # stays within the service limit.
+                self.rate_limiter.acquire_sync()
                 result = lookup_func(item)
                 if on_complete:
                     on_complete(item, result)

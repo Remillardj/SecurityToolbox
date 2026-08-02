@@ -5,7 +5,6 @@ CLI commands for the log analysis module.
 import click
 import sys
 import json as json_lib
-from pathlib import Path
 
 
 @click.group()
@@ -108,7 +107,7 @@ def analyze(input_file, log_format, checks, mitre, json_output, output):
     """
     from .parsers import parse_log
     from .analyzers import analyze_logs
-    from ..utils import Colors, print_header, print_subheader, print_finding
+    from ..utils import Colors, print_header, print_subheader
     
     # Parse checks
     check_list = None
@@ -167,7 +166,7 @@ def analyze(input_file, log_format, checks, mitre, json_output, output):
             click.echo(f"    Events: {finding.event_count}")
             
             if finding.evidence:
-                click.echo(f"    Evidence:")
+                click.echo("    Evidence:")
                 for ev in finding.evidence[:3]:
                     click.echo(f"      • {ev[:80]}...")
     else:
@@ -181,17 +180,17 @@ def analyze(input_file, log_format, checks, mitre, json_output, output):
         if stats.get('auth_success') or stats.get('auth_failure'):
             total_auth = stats['auth_success'] + stats['auth_failure']
             fail_rate = (stats['auth_failure'] / total_auth * 100) if total_auth > 0 else 0
-            click.echo(f"\n  Authentication:")
+            click.echo("\n  Authentication:")
             click.echo(f"    Success: {stats['auth_success']}")
             click.echo(f"    Failure: {stats['auth_failure']} ({fail_rate:.1f}%)")
         
         if stats.get('source_ips'):
-            click.echo(f"\n  Top Source IPs:")
+            click.echo("\n  Top Source IPs:")
             for ip, count in list(stats['source_ips'].items())[:5]:
                 click.echo(f"    {ip}: {count}")
         
         if stats.get('users'):
-            click.echo(f"\n  Top Users:")
+            click.echo("\n  Top Users:")
             for user, count in list(stats['users'].items())[:5]:
                 click.echo(f"    {user}: {count}")
     
@@ -800,7 +799,7 @@ def stats(input_file, log_format, top_ips, top_users, by_hour, json_output):
     """
     from .parsers import parse_log
     from collections import defaultdict
-    from ..utils import Colors, print_header, print_subheader
+    from ..utils import print_header, print_subheader
     import re
     
     events = parse_log(input_file, log_format)

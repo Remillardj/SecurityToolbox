@@ -5,7 +5,7 @@ Extract printable strings from binary files.
 
 import re
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List
 from dataclasses import dataclass, field
 
 

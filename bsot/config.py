@@ -4,6 +4,7 @@ Handles API keys, settings, and profiles from environment variables or config fi
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 import json
@@ -54,50 +55,49 @@ class Config:
     def __init__(self, profile: str = None):
         """
         Initialize configuration.
-        
+
         Args:
             profile: Profile name to load (default: 'default' or None for base config)
         """
         self.profile_name = profile
-        self._config = self._load_config(profile)
+        self._base = self._load_file(self.CONFIG_FILE)
+        self._profile = (
+            self._load_file(self.PROFILES_DIR / f"{profile}.json") if profile else {}
+        )
+        # Effective view: profile overrides base. Writes go to one layer only,
+        # so saving a profile never copies base keys into it.
+        self._config = {**self._base, **self._profile}
     
-    def _load_config(self, profile: str = None) -> dict:
-        """Load configuration from file(s)."""
-        config = {}
-        
-        # Load base config
-        if self.CONFIG_FILE.exists():
-            try:
-                with open(self.CONFIG_FILE, 'r') as f:
-                    config = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
-        
-        # Load profile if specified
-        if profile:
-            profile_file = self.PROFILES_DIR / f"{profile}.json"
-            if profile_file.exists():
-                try:
-                    with open(profile_file, 'r') as f:
-                        profile_config = json.load(f)
-                        # Profile overrides base config
-                        config.update(profile_config)
-                except (json.JSONDecodeError, IOError):
-                    pass
-        
-        return config
+    @staticmethod
+    def _load_file(path: Path) -> dict:
+        """Load one config file. A corrupt file warns rather than vanishing."""
+        if not path.exists():
+            return {}
+        try:
+            with open(path, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            print(
+                f"Warning: config file {path} is not valid JSON ({e}); ignoring it.",
+                file=sys.stderr,
+            )
+        except IOError as e:
+            print(f"Warning: could not read config file {path}: {e}", file=sys.stderr)
+        return {}
     
     def _save_config(self, profile: str = None):
-        """Save configuration to file."""
+        """Save one layer to disk (profile layer, or base config)."""
         if profile:
             self.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
             config_path = self.PROFILES_DIR / f"{profile}.json"
+            data = self._profile
         else:
             self.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             config_path = self.CONFIG_FILE
-        
+            data = self._base
+
         with open(config_path, 'w') as f:
-            json.dump(self._config, f, indent=2)
+            json.dump(data, f, indent=2)
         
         # Secure the config file (Unix only)
         try:
@@ -136,8 +136,13 @@ class Config:
             value: Value to set
             profile: Profile to save to (None for base config)
         """
+        target = profile or self.profile_name
+        if target:
+            self._profile[key] = value
+        else:
+            self._base[key] = value
         self._config[key] = value
-        self._save_config(profile or self.profile_name)
+        self._save_config(target)
     
     def list_profiles(self) -> list:
         """List available profiles."""
@@ -269,13 +274,17 @@ class Config:
     def ollama_model(self) -> Optional[str]:
         return self.get('ollama_model', 'llama3')
     
+    # Any key containing one of these is treated as a secret and never
+    # returned by get_settings().
+    _SECRET_MARKERS = ('key', 'secret', 'token', 'password', 'credential')
+
     def get_settings(self) -> Dict[str, Any]:
         """Get all non-sensitive settings."""
-        settings = {}
-        for key, value in self._config.items():
-            if not key.endswith('_key') and not key.endswith('_secret'):
-                settings[key] = value
-        return settings
+        return {
+            key: value
+            for key, value in self._config.items()
+            if not any(marker in key.lower() for marker in self._SECRET_MARKERS)
+        }
     
     def has_api_key(self, service: str) -> bool:
         """Check if an API key is configured for a service."""

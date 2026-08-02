@@ -5,10 +5,8 @@ Integrates with VirusTotal, AbuseIPDB, URLScan.io for IOC reputation checks.
 
 import time
 import base64
-import hashlib
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 

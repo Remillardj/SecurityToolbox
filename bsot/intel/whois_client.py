@@ -3,10 +3,9 @@ WHOIS Lookup Client
 Domain registration information lookups.
 """
 
-import re
-from typing import Optional, Dict, Any
+from typing import Optional
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ..cache import cache
 

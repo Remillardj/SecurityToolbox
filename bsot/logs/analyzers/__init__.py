@@ -6,7 +6,7 @@ Attack detection and pattern analysis.
 from typing import List, Dict, Any
 from dataclasses import dataclass, field
 from collections import defaultdict
-from datetime import datetime, timedelta
+
 import re
 
 

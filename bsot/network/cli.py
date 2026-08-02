@@ -6,6 +6,7 @@ import click
 import sys
 import json as json_lib
 import socket
+import time
 
 
 @click.group()
@@ -116,7 +117,7 @@ def headers(url, json_output):
         bsot network headers example.com --json
     """
     from .header_auditor import SecurityHeaderAuditor
-    from ..utils import Colors, print_header, print_subheader, print_finding
+    from ..utils import Colors, print_header, print_subheader
     
     auditor = SecurityHeaderAuditor()
     result = auditor.audit(url)
@@ -190,7 +191,7 @@ def dns(domain, json_output):
         bsot network dns google.com --json
     """
     from .dns_security import DNSChecker
-    from ..utils import Colors, print_header, print_subheader, print_finding
+    from ..utils import Colors, print_header, print_subheader
     
     checker = DNSChecker()
     result = checker.check(domain)
@@ -370,3 +371,161 @@ def _guess_service(port: int) -> str:
     }
     return services.get(port, 'unknown')
 
+
+
+@network.command('ct-subdomains')
+@click.argument('domain')
+@click.option('--include-expired', is_flag=True, help='Include certificates that have expired')
+@click.option('--resolve', is_flag=True, help='Resolve each subdomain to check which are live')
+@click.option('--timeout', default=30, show_default=True, help='HTTP timeout in seconds')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def ct_subdomains(domain, include_expired, resolve, timeout, json_output):
+    """
+    Enumerate subdomains from Certificate Transparency logs (crt.sh).
+
+    \b
+    Passive reconnaissance: queries public CT logs rather than touching the
+    target, so it is safe to run against third-party infrastructure.
+
+    \b
+    Examples:
+        bsot network ct-subdomains example.com
+        bsot network ct-subdomains example.com --resolve
+        bsot network ct-subdomains example.com --json
+    """
+    import re
+    import requests
+    from datetime import datetime, timezone
+    from ..utils import Colors, print_header
+
+    domain = domain.strip().lower().lstrip('*.')
+    if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$', domain):
+        click.echo(f"Error: '{domain}' is not a valid domain", err=True)
+        sys.exit(2)
+
+    # crt.sh frequently returns 502/503 under load, so transient failures are
+    # retried rather than surfaced as a hard error on the first attempt.
+    records = None
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                'https://crt.sh/',
+                params={'q': f'%.{domain}', 'output': 'json'},
+                timeout=timeout,
+                headers={'User-Agent': 'bsot/ct-subdomains'},
+            )
+            if response.status_code in (429, 500, 502, 503, 504):
+                last_error = f"HTTP {response.status_code}"
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                click.echo(
+                    f"Error: crt.sh is unavailable ({last_error}) after 3 attempts. "
+                    f"The service is often overloaded; try again shortly.",
+                    err=True,
+                )
+                sys.exit(2)
+            response.raise_for_status()
+            records = response.json()
+            break
+        except requests.exceptions.Timeout:
+            last_error = f"timed out after {timeout}s"
+            if attempt < 2:
+                continue
+            click.echo(f"Error: crt.sh {last_error}", err=True)
+            sys.exit(2)
+        except requests.exceptions.RequestException as e:
+            click.echo(f"Error: crt.sh request failed: {e}", err=True)
+            sys.exit(2)
+        except ValueError:
+            # An HTML error page instead of JSON is another overload symptom.
+            last_error = "non-JSON response"
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            click.echo("Error: crt.sh returned a non-JSON response", err=True)
+            sys.exit(2)
+
+    if records is None:
+        click.echo(f"Error: crt.sh request failed ({last_error})", err=True)
+        sys.exit(2)
+
+    now = datetime.now(timezone.utc)
+    subdomains = {}
+
+    for rec in records:
+        # name_value holds one or more names, newline-separated.
+        for name in (rec.get('name_value') or '').split('\n'):
+            name = name.strip().lower().lstrip('*.')
+            if not name or not name.endswith(domain):
+                continue
+
+            not_after = rec.get('not_after', '')
+            expired = False
+            if not_after:
+                try:
+                    expiry = datetime.fromisoformat(not_after.replace('Z', '+00:00'))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    expired = expiry < now
+                except ValueError:
+                    pass
+
+            if expired and not include_expired:
+                continue
+
+            entry = subdomains.setdefault(name, {
+                'name': name,
+                'first_seen': rec.get('not_before', ''),
+                'last_seen': rec.get('not_after', ''),
+                'issuers': set(),
+                'expired': expired,
+            })
+            entry['issuers'].add(rec.get('issuer_name', '')[:80])
+            if not expired:
+                entry['expired'] = False
+            if rec.get('not_after', '') > entry['last_seen']:
+                entry['last_seen'] = rec.get('not_after', '')
+
+    results = []
+    for name in sorted(subdomains):
+        entry = subdomains[name]
+        entry['issuers'] = sorted(i for i in entry['issuers'] if i)
+        if resolve:
+            try:
+                entry['addresses'] = sorted({
+                    info[4][0] for info in socket.getaddrinfo(name, None)
+                })
+            except (socket.gaierror, OSError):
+                entry['addresses'] = []
+            entry['live'] = bool(entry['addresses'])
+        results.append(entry)
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'domain': domain,
+            'count': len(results),
+            'subdomains': results,
+        }, indent=2))
+    else:
+        print_header(f"CT Subdomains: {domain}")
+        if not results:
+            click.echo(f"  {Colors.YELLOW}No subdomains found in CT logs{Colors.RESET}\n")
+        else:
+            for entry in results:
+                line = f"  {Colors.CYAN}{entry['name']}{Colors.RESET}"
+                if entry['expired']:
+                    line += f" {Colors.DIM}(cert expired){Colors.RESET}"
+                if resolve:
+                    if entry['live']:
+                        line += f" {Colors.GREEN}→ {', '.join(entry['addresses'][:3])}{Colors.RESET}"
+                    else:
+                        line += f" {Colors.DIM}(no DNS){Colors.RESET}"
+                click.echo(line)
+            click.echo()
+            live_note = ''
+            if resolve:
+                live_note = f"; {sum(1 for r in results if r['live'])} resolving"
+            click.echo(f"  {len(results)} unique subdomain(s){live_note}.")
+            click.echo()

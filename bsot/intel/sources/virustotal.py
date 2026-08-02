@@ -4,7 +4,7 @@ VirusTotal API Client
 
 import base64
 import requests
-from typing import Dict, Any, Optional
+from typing import Optional
 from dataclasses import dataclass, field
 
 from ...cache import cache
@@ -233,7 +233,7 @@ class VirusTotalClient:
     
     def lookup(self, ioc: str, ioc_type: str = None, use_cache: bool = True) -> VTResult:
         """Generic lookup - auto-detect type if not specified."""
-        from ..ioc_utils import detect_ioc_type, IOCType
+        from ..ioc_utils import detect_ioc_type
         
         if not ioc_type:
             detected = detect_ioc_type(ioc)

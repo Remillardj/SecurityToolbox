@@ -262,3 +262,176 @@ def detect_encoding(data: str) -> Optional[str]:
     
     return None
 
+
+
+def _printable_ratio(text: str) -> float:
+    """
+    Fraction of characters that look like real text.
+
+    U+FFFD is excluded deliberately: decoders that use errors='replace' emit it
+    for binary garbage, and str.isprintable() considers it printable — so
+    counting it would score random bytes as perfectly readable.
+    """
+    if not text:
+        return 0.0
+    ok = 0
+    for c in text:
+        if c == '\ufffd':
+            continue
+        if c in '\n\r\t' or (c.isprintable() and ord(c) < 0x2500):
+            ok += 1
+    return ok / len(text)
+
+
+def _looks_like_base64(data: str) -> bool:
+    """Whether data is plausibly base64 rather than ordinary text."""
+    import re
+    stripped = ''.join(data.split())
+    if len(stripped) < 8 or len(stripped) % 4 != 0:
+        return False
+    if not re.fullmatch(r'[A-Za-z0-9+/]+={0,2}', stripped):
+        return False
+    # Ordinary prose is also valid base64 charset; require the mixed-case and
+    # digit density that real encoded data has.
+    has_digit = any(c.isdigit() for c in stripped)
+    has_upper = any(c.isupper() for c in stripped)
+    has_lower = any(c.islower() for c in stripped)
+    return sum((has_digit, has_upper, has_lower)) >= 2
+
+
+def _looks_like_hex(data: str) -> bool:
+    """Whether data is plausibly hex-encoded."""
+    import re
+    stripped = ''.join(data.split()).removeprefix('0x')
+    return len(stripped) >= 8 and len(stripped) % 2 == 0 and bool(
+        re.fullmatch(r'[0-9a-fA-F]+', stripped)
+    )
+
+
+def decode_gzip(data: str) -> str:
+    """Decompress gzip data supplied as a latin-1 byte string."""
+    import gzip
+    return gzip.decompress(data.encode('latin-1')).decode('utf-8', errors='replace')
+
+
+def decode_zlib(data: str) -> str:
+    """Decompress zlib data supplied as a latin-1 byte string."""
+    import zlib
+    return zlib.decompress(data.encode('latin-1')).decode('utf-8', errors='replace')
+
+
+def _decode_base64_bytes(data: str) -> bytes:
+    """Decode base64 to raw bytes, preserving binary payloads."""
+    data = ''.join(data.split()).replace('-', '+').replace('_', '/')
+    padding = 4 - len(data) % 4
+    if padding != 4:
+        data += '=' * padding
+    return base64.b64decode(data)
+
+
+def _try_decode(data: str, encoding: str) -> Optional[str]:
+    """
+    Attempt one decode step, returning None when it does not apply.
+
+    Binary intermediates (base64 wrapping gzip, say) are carried as latin-1
+    strings so no byte is lost between layers.
+    """
+    try:
+        if encoding == 'gzip':
+            return decode_gzip(data)
+        if encoding == 'zlib':
+            return decode_zlib(data)
+        if encoding == 'base64':
+            raw = _decode_base64_bytes(data)
+            try:
+                return raw.decode('utf-8')
+            except UnicodeDecodeError:
+                # Not text: keep the exact bytes so a later gzip/zlib layer
+                # can still read them.
+                return raw.decode('latin-1')
+        if encoding == 'hex':
+            raw = bytes.fromhex(''.join(data.split()).removeprefix('0x'))
+            try:
+                return raw.decode('utf-8')
+            except UnicodeDecodeError:
+                return raw.decode('latin-1')
+        return decode(data, encoding)
+    except Exception:
+        return None
+
+
+def _is_compressed(data: str) -> Optional[str]:
+    """Detect gzip/zlib magic bytes in a latin-1 carried string."""
+    try:
+        raw = data.encode('latin-1')
+    except UnicodeEncodeError:
+        return None
+    if raw[:2] == b'\x1f\x8b':
+        return 'gzip'
+    # zlib: CMF/FLG where CMF low nibble is 8 and the pair is a multiple of 31
+    if len(raw) > 2 and raw[0] & 0x0F == 8 and (raw[0] << 8 | raw[1]) % 31 == 0:
+        return 'zlib'
+    return None
+
+
+def magic_decode(data: str, max_depth: int = 8) -> list:
+    """
+    Recursively auto-decode data until it stops looking encoded.
+
+    At each step every candidate encoding is tried and the result that most
+    improves readability wins. Returns the list of steps applied; an empty
+    list means nothing decoded.
+    """
+    # Compression is checked first: its magic bytes are unambiguous.
+    candidates = ['gzip', 'zlib', 'base64', 'hex', 'url', 'html', 'unicode-escape', 'punycode']
+    steps = []
+    current = data
+    seen = {data}
+
+    for _ in range(max_depth):
+        best = None
+
+        for encoding in candidates:
+            # Cheap guards to avoid nonsense transforms.
+            if encoding == 'url' and '%' not in current:
+                continue
+            if encoding == 'html' and '&' not in current:
+                continue
+            if encoding == 'unicode-escape' and '\\u' not in current:
+                continue
+            if encoding == 'punycode' and 'xn--' not in current:
+                continue
+            if encoding == 'base64' and not _looks_like_base64(current):
+                continue
+            if encoding == 'hex' and not _looks_like_hex(current):
+                continue
+
+            result = _try_decode(current, encoding)
+            if not result or result == current or result in seen:
+                continue
+
+            score = _printable_ratio(result)
+            # Unreadable output is normally a sign we decoded something that
+            # was not encoded — unless it is recognisably compressed, in which
+            # case the next layer will decompress it.
+            if score < 0.95 and not _is_compressed(result):
+                continue
+            if _is_compressed(result):
+                # Prefer following a compression layer over any text candidate.
+                score = 2.0
+            if best is None or score > best[1]:
+                best = (encoding, score, result)
+
+        if best is None:
+            break
+
+        encoding, score, result = best
+        steps.append({
+            'encoding': encoding,
+            'output': result,
+            'printable_ratio': round(score, 3),
+        })
+        seen.add(result)
+        current = result
+
+    return steps

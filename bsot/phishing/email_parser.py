@@ -3,15 +3,12 @@ Email Parser Module
 Parses .eml and .msg email files for analysis.
 """
 
-import email
 from email import policy
 from email.parser import BytesParser
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-import base64
-import quopri
 import re
 from datetime import datetime
 

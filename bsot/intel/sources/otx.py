@@ -3,7 +3,7 @@ AlienVault OTX (Open Threat Exchange) API Client
 """
 
 import requests
-from typing import Optional, List
+from typing import Optional
 from dataclasses import dataclass, field
 
 from ...cache import cache
@@ -256,7 +256,7 @@ class OTXClient:
     
     def lookup(self, ioc: str, ioc_type: str = None, use_cache: bool = True) -> OTXResult:
         """Generic lookup - auto-detect type if not specified."""
-        from ..ioc_utils import detect_ioc_type, IOCType
+        from ..ioc_utils import detect_ioc_type
         
         if not ioc_type:
             detected = detect_ioc_type(ioc)

@@ -4,7 +4,6 @@ Shared utilities for formatting, colors, and output.
 """
 
 import hashlib
-from typing import Optional
 
 
 class Colors:

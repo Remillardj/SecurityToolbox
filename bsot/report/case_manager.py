@@ -8,9 +8,9 @@ import uuid
 import hashlib
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -71,7 +71,7 @@ class Case:
     def save(self):
         """Save case metadata to case.json."""
         if self.path:
-            self.updated_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            self.updated_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
             case_file = self.path / 'case.json'
             case_file.write_text(json.dumps(self.to_dict(), indent=2))
     
@@ -164,7 +164,7 @@ class CaseManager:
             (case_path / subdir).mkdir(parents=True, exist_ok=True)
         
         # Create case object
-        now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         case = Case(
             id=str(uuid.uuid4()),
             name=safe_name,
@@ -352,7 +352,7 @@ class CaseManager:
             'path': str(dest_path),
             'size': dest_path.stat().st_size,
             'hashes': hashes,
-            'added_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'added_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         }
     
     def _sanitize_name(self, name: str) -> str:

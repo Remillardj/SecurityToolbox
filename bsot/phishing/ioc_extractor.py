@@ -4,7 +4,7 @@ Extracts URLs, IPs, domains, email addresses, and file hashes from content.
 """
 
 import re
-from typing import List, Set, Dict, Any, Optional
+from typing import List, Dict
 from dataclasses import dataclass, field
 from urllib.parse import urlparse, unquote
 import ipaddress

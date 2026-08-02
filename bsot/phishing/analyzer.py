@@ -3,16 +3,14 @@ Main Phishing Analyzer Module
 Orchestrates all analysis components for comprehensive phishing detection.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from dataclasses import dataclass, field
-from pathlib import Path
-import json
 
 from .email_parser import EmailParser, ParsedEmail
 from .ioc_extractor import IOCExtractor, ExtractedIOCs, extract_iocs_from_email
 from .header_analyzer import HeaderAnalyzer, HeaderAnalysisResult, analyze_email_headers
 from .llm_analyzer import LLMAnalyzer, LLMAnalysisResult, analyze_email_with_llm
-from .reputation import ReputationChecker, AggregatedReputation
+from .reputation import ReputationChecker
 from .report import ReportGenerator, PhishingVerdict
 
 

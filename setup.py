@@ -18,7 +18,7 @@ setup(
     author='Security Team',
     url='https://github.com/Remillardj/SecurityToolbox',
     python_requires='>=3.8',
-    packages=find_packages(),
+    packages=find_packages(include=['bsot', 'bsot.*']),
     install_requires=[
         'click>=8.0.0',
         'requests>=2.25.0',
@@ -45,7 +45,7 @@ setup(
             'py-tlsh>=4.7.2',         # TLSH fuzzy hashing
         ],
         'report': [
-            'anthropic>=0.18.0',      # Anthropic Claude API
+            'anthropic>=0.40.0',      # Anthropic Claude API
             'openai>=1.10.0',         # OpenAI API
             'markdown>=3.5.0',        # Markdown to HTML conversion
             # 'pyzipper>=0.3.6',      # Encrypted ZIP (optional)
