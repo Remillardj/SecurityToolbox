@@ -703,3 +703,230 @@ def suid_finder(directory, known, json_output):
 
     if unexpected:
         sys.exit(1)
+
+
+def _walk_for_baseline(root: Path, exclude: tuple) -> list:
+    """Yield (relative_path, absolute_path) for every regular file under root."""
+    import fnmatch
+    import os
+
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
+        # Prune excluded directories in place so os.walk skips descending.
+        dirnames[:] = [
+            d for d in dirnames
+            if not any(fnmatch.fnmatch(d, pat) for pat in exclude)
+        ]
+        for name in filenames:
+            if any(fnmatch.fnmatch(name, pat) for pat in exclude):
+                continue
+            absolute = Path(dirpath) / name
+            if absolute.is_symlink() or not absolute.is_file():
+                continue
+            entries.append((str(absolute.relative_to(root)), absolute))
+    return sorted(entries)
+
+
+def _hash_file(path: Path, algo: str = 'sha256') -> str:
+    import hashlib
+
+    digest = hashlib.new(algo)
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@file.command()
+@click.argument('directory', type=click.Path(exists=True, file_okay=False))
+@click.option('--output', '-o', type=click.Path(), required=True, help='Baseline file to write')
+@click.option('--algo', default='sha256', show_default=True, help='Hash algorithm')
+@click.option('--exclude', multiple=True,
+              default=('.git', '__pycache__', '*.pyc', '.DS_Store', 'node_modules', '.venv'),
+              show_default=True, help='Glob patterns to skip (repeatable)')
+def baseline(directory, output, algo, exclude):
+    """
+    Record a hash manifest of a directory for later integrity checking.
+
+    \b
+    Examples:
+        bsot file baseline /etc -o etc-baseline.json
+        bsot file baseline /var/www -o www.json --exclude '*.log'
+    """
+    from datetime import datetime, timezone
+    import platform
+    from ..utils import Colors, print_header
+
+    root = Path(directory).resolve()
+    entries = _walk_for_baseline(root, exclude)
+
+    files = {}
+    unreadable = []
+    for relative, absolute in entries:
+        try:
+            stat_result = absolute.stat()
+            files[relative] = {
+                'sha256' if algo == 'sha256' else algo: _hash_file(absolute, algo),
+                'size': stat_result.st_size,
+                'mode': oct(stat_result.st_mode & 0o7777)[2:].rjust(4, '0'),
+                'mtime': int(stat_result.st_mtime),
+            }
+        except (OSError, PermissionError) as e:
+            unreadable.append({'path': relative, 'error': str(e)})
+
+    manifest = {
+        'version': 1,
+        'root': str(root),
+        'algorithm': algo,
+        'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'hostname': platform.node(),
+        'exclude': list(exclude),
+        'file_count': len(files),
+        'files': files,
+        'unreadable': unreadable,
+    }
+
+    Path(output).write_text(json_lib.dumps(manifest, indent=2))
+
+    print_header(f"Baseline: {root}")
+    click.echo(f"  Hashed {len(files)} file(s) with {algo}.")
+    if unreadable:
+        click.echo(f"  {Colors.YELLOW}{len(unreadable)} file(s) unreadable.{Colors.RESET}")
+    click.echo(f"  Written to {output}")
+    click.echo()
+
+
+@file.command()
+@click.argument('baseline_file', type=click.Path(exists=True, dir_okay=False))
+@click.option('--directory', '-d', type=click.Path(exists=True, file_okay=False),
+              help='Directory to compare (default: the path recorded in the baseline)')
+@click.option('--ignore-mtime', is_flag=True, help='Ignore modification-time-only changes')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def diff(baseline_file, directory, ignore_mtime, json_output):
+    """
+    Compare a directory against a baseline manifest.
+
+    \b
+    Reports added, removed, and modified files. Content changes are detected
+    by hash, so a file restored to its original bytes reads as unchanged even
+    if its timestamps moved.
+
+    \b
+    Examples:
+        bsot file diff etc-baseline.json
+        bsot file diff www.json -d /var/www --json
+    """
+    from ..utils import Colors, print_header, print_subheader
+
+    try:
+        manifest = json_lib.loads(Path(baseline_file).read_text())
+    except (json_lib.JSONDecodeError, OSError) as e:
+        click.echo(f"Error: could not read baseline: {e}", err=True)
+        sys.exit(2)
+
+    if manifest.get('version') != 1:
+        click.echo(f"Error: unsupported baseline version {manifest.get('version')}.", err=True)
+        sys.exit(2)
+
+    root = Path(directory).resolve() if directory else Path(manifest['root'])
+    if not root.is_dir():
+        click.echo(f"Error: {root} is not a directory. Pass -d to compare elsewhere.", err=True)
+        sys.exit(2)
+
+    algo = manifest.get('algorithm', 'sha256')
+    hash_field = 'sha256' if algo == 'sha256' else algo
+    recorded = manifest['files']
+    exclude = tuple(manifest.get('exclude', ()))
+
+    current = {}
+    for relative, absolute in _walk_for_baseline(root, exclude):
+        try:
+            stat_result = absolute.stat()
+            current[relative] = {
+                hash_field: _hash_file(absolute, algo),
+                'size': stat_result.st_size,
+                'mode': oct(stat_result.st_mode & 0o7777)[2:].rjust(4, '0'),
+                'mtime': int(stat_result.st_mtime),
+            }
+        except (OSError, PermissionError):
+            continue
+
+    added = sorted(set(current) - set(recorded))
+    removed = sorted(set(recorded) - set(current))
+    modified = []
+
+    for path in sorted(set(recorded) & set(current)):
+        before, after = recorded[path], current[path]
+        changes = []
+        if before.get(hash_field) != after.get(hash_field):
+            changes.append('content')
+        if before.get('mode') != after.get('mode'):
+            changes.append('permissions')
+        if not ignore_mtime and before.get('mtime') != after.get('mtime') and not changes:
+            # A timestamp move with identical content is worth noting but is
+            # not tampering on its own.
+            changes.append('mtime only')
+        if changes:
+            modified.append({
+                'path': path,
+                'changes': changes,
+                'before': before,
+                'after': after,
+            })
+
+    content_changes = [m for m in modified if 'content' in m['changes']]
+    drifted = bool(added or removed or content_changes
+                   or [m for m in modified if 'permissions' in m['changes']])
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'baseline': baseline_file,
+            'root': str(root),
+            'baseline_created_at': manifest.get('created_at'),
+            'added': added,
+            'removed': removed,
+            'modified': modified,
+            'summary': {
+                'added': len(added),
+                'removed': len(removed),
+                'modified': len(modified),
+                'content_changed': len(content_changes),
+            },
+        }, indent=2))
+    else:
+        print_header(f"Baseline Diff: {root}")
+        click.echo(f"  Baseline taken {manifest.get('created_at', 'unknown')}\n")
+
+        if added:
+            print_subheader(f"Added ({len(added)})")
+            for path in added[:50]:
+                click.echo(f"  {Colors.GREEN}+ {path}{Colors.RESET}")
+            if len(added) > 50:
+                click.echo(f"  {Colors.DIM}... and {len(added) - 50} more{Colors.RESET}")
+
+        if removed:
+            print_subheader(f"Removed ({len(removed)})")
+            for path in removed[:50]:
+                click.echo(f"  {Colors.RED}- {path}{Colors.RESET}")
+            if len(removed) > 50:
+                click.echo(f"  {Colors.DIM}... and {len(removed) - 50} more{Colors.RESET}")
+
+        if modified:
+            print_subheader(f"Modified ({len(modified)})")
+            for entry in modified[:50]:
+                marker = Colors.RED if 'content' in entry['changes'] else Colors.YELLOW
+                click.echo(f"  {marker}~ {entry['path']}{Colors.RESET}"
+                           f" {Colors.DIM}({', '.join(entry['changes'])}){Colors.RESET}")
+            if len(modified) > 50:
+                click.echo(f"  {Colors.DIM}... and {len(modified) - 50} more{Colors.RESET}")
+
+        if not (added or removed or modified):
+            click.echo(f"  {Colors.GREEN}No changes detected.{Colors.RESET}")
+
+        click.echo()
+        click.echo(f"  {len(added)} added, {len(removed)} removed, "
+                   f"{len(modified)} modified ({len(content_changes)} content changes).")
+        click.echo()
+
+    if drifted:
+        sys.exit(1)

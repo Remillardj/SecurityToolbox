@@ -190,8 +190,13 @@ class SSLChecker:
             except ValueError:
                 pass
         
-        # Serial number
-        result.serial_number = hex(cert.get('serialNumber', 0))
+        # Serial number. getpeercert() returns this as an uppercase hex string,
+        # not an int, so it is normalised rather than passed through hex().
+        serial = cert.get('serialNumber', '')
+        if isinstance(serial, int):
+            result.serial_number = format(serial, 'X')
+        else:
+            result.serial_number = str(serial).upper()
         result.cert_version = cert.get('version', 0)
         
         # Subject Alternative Names

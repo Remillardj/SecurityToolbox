@@ -247,3 +247,244 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# Services BSOT can talk to, and how to prove a key works. Each probe is a
+# cheap, read-only call against the provider's own account/quota endpoint.
+_SERVICE_PROBES = {
+    'virustotal': {
+        'config_key': 'virustotal_api_key',
+        'env': 'VIRUSTOTAL_API_KEY',
+        'unlocks': ['intel enrich', 'system processes --vt', 'malware submit'],
+        'url': 'https://www.virustotal.com/api/v3/users/{key}',
+        'auth': lambda key: {'x-apikey': key},
+    },
+    'abuseipdb': {
+        'config_key': 'abuseipdb_api_key',
+        'env': 'ABUSEIPDB_API_KEY',
+        'unlocks': ['intel enrich'],
+        'url': 'https://api.abuseipdb.com/api/v2/check?ipAddress=8.8.8.8&maxAgeInDays=1',
+        'auth': lambda key: {'Key': key, 'Accept': 'application/json'},
+    },
+    'greynoise': {
+        'config_key': 'greynoise_api_key',
+        'env': 'GREYNOISE_API_KEY',
+        'unlocks': ['intel enrich'],
+        'url': 'https://api.greynoise.io/v3/community/8.8.8.8',
+        'auth': lambda key: {'key': key},
+    },
+    'otx': {
+        'config_key': 'otx_api_key',
+        'env': 'OTX_API_KEY',
+        'unlocks': ['intel enrich'],
+        'url': 'https://otx.alienvault.com/api/v1/user/me',
+        'auth': lambda key: {'X-OTX-API-KEY': key},
+    },
+    'ipinfo': {
+        'config_key': 'ipinfo_api_key',
+        'env': 'IPINFO_API_KEY',
+        'unlocks': ['intel geoip'],
+        'url': 'https://ipinfo.io/8.8.8.8/json?token={key}',
+        'auth': lambda key: {},
+    },
+    'urlscan': {
+        'config_key': 'urlscan_api_key',
+        'env': 'URLSCAN_API_KEY',
+        'unlocks': ['phishing reputation', 'phishing url'],
+        'url': 'https://urlscan.io/user/quotas/',
+        'auth': lambda key: {'API-Key': key},
+    },
+    'shodan': {
+        'config_key': 'shodan_api_key',
+        'env': 'SHODAN_API_KEY',
+        'unlocks': ['osint'],
+        'url': 'https://api.shodan.io/api-info?key={key}',
+        'auth': lambda key: {},
+    },
+    'hybrid_analysis': {
+        'config_key': 'hybrid_analysis_api_key',
+        'env': 'HYBRID_ANALYSIS_API_KEY',
+        'unlocks': ['malware submit'],
+        'url': 'https://www.hybrid-analysis.com/api/v2/key/current',
+        'auth': lambda key: {'api-key': key, 'User-Agent': 'Falcon Sandbox'},
+    },
+    'anthropic': {
+        'config_key': 'anthropic_api_key',
+        'env': 'ANTHROPIC_API_KEY',
+        'unlocks': ['logs ai-analyze', 'phishing ai-analyze', 'report generate'],
+        'url': 'https://api.anthropic.com/v1/models',
+        'auth': lambda key: {'x-api-key': key, 'anthropic-version': '2023-06-01'},
+    },
+    'openai': {
+        'config_key': 'openai_api_key',
+        'env': 'OPENAI_API_KEY',
+        'unlocks': ['logs ai-analyze', 'phishing ai-analyze', 'report generate'],
+        'url': 'https://api.openai.com/v1/models',
+        'auth': lambda key: {'Authorization': f'Bearer {key}'},
+    },
+    'cloudflare': {
+        'config_key': 'cloudflare_api_token',
+        'env': 'CLOUDFLARE_API_TOKEN',
+        'unlocks': ['ir block', 'ir contain'],
+        'url': 'https://api.cloudflare.com/client/v4/user/tokens/verify',
+        'auth': lambda key: {'Authorization': f'Bearer {key}'},
+    },
+}
+
+
+@config.command('check')
+@click.option('--live', is_flag=True, help='Validate each key against the provider')
+@click.option('--service', '-s', help='Check only this service')
+@click.option('--profile', '-p', help='Profile to check')
+@click.option('--timeout', default=10, show_default=True, help='Per-probe timeout in seconds')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def config_check(live, service, profile, timeout, json_output):
+    """
+    Check which API keys are configured and which commands they unlock.
+
+    \b
+    Without --live this only inspects configuration. With --live each key is
+    validated against the provider using a cheap read-only call.
+
+    \b
+    Examples:
+        bsot config check
+        bsot config check --live
+        bsot config check --live --service virustotal
+    """
+    import os
+    from .config import get_config
+    from .utils import Colors, print_header, mask_sensitive
+
+    cfg = get_config(profile)
+    probes = _SERVICE_PROBES
+    if service:
+        if service not in probes:
+            click.echo(f"Error: unknown service '{service}'.", err=True)
+            click.echo(f"Known: {', '.join(sorted(probes))}", err=True)
+            sys.exit(2)
+        probes = {service: probes[service]}
+
+    results = []
+    for name, spec in sorted(probes.items()):
+        key = cfg.get(spec['config_key'])
+        entry = {
+            'service': name,
+            'configured': bool(key),
+            'source': 'env' if os.environ.get(spec['env']) else ('config' if key else None),
+            'unlocks': spec['unlocks'],
+            'valid': None,
+            'detail': '',
+        }
+
+        if key and live:
+            import requests
+            try:
+                response = requests.get(
+                    spec['url'].format(key=key),
+                    headers=spec['auth'](key),
+                    timeout=timeout,
+                )
+                if response.status_code in (200, 204):
+                    entry['valid'] = True
+                elif response.status_code in (401, 403):
+                    entry['valid'] = False
+                    entry['detail'] = f'rejected (HTTP {response.status_code})'
+                elif response.status_code == 429:
+                    # The key authenticated; the account is just rate limited.
+                    entry['valid'] = True
+                    entry['detail'] = 'rate limited, but the key is accepted'
+                else:
+                    entry['detail'] = f'unexpected HTTP {response.status_code}'
+            except requests.exceptions.Timeout:
+                entry['detail'] = f'timed out after {timeout}s'
+            except requests.exceptions.RequestException as e:
+                entry['detail'] = f'request failed: {type(e).__name__}'
+
+        results.append(entry)
+
+    configured = [r for r in results if r['configured']]
+    invalid = [r for r in results if r['valid'] is False]
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'profile': profile,
+            'checked_live': live,
+            'configured_count': len(configured),
+            'invalid_count': len(invalid),
+            'services': results,
+        }, indent=2))
+    else:
+        print_header('BSOT Configuration Check')
+        for r in results:
+            if not r['configured']:
+                icon = f"{Colors.DIM}○{Colors.RESET}"
+                status = f"{Colors.DIM}not configured{Colors.RESET}"
+            elif r['valid'] is True:
+                icon = f"{Colors.GREEN}✓{Colors.RESET}"
+                status = f"{Colors.GREEN}valid{Colors.RESET}"
+            elif r['valid'] is False:
+                icon = f"{Colors.RED}✗{Colors.RESET}"
+                status = f"{Colors.RED}{r['detail']}{Colors.RESET}"
+            elif r['detail']:
+                icon = f"{Colors.YELLOW}?{Colors.RESET}"
+                status = f"{Colors.YELLOW}{r['detail']}{Colors.RESET}"
+            else:
+                icon = f"{Colors.CYAN}●{Colors.RESET}"
+                status = f"set via {r['source']}"
+
+            click.echo(f"  {icon} {r['service']:18s} {status}")
+            if not r['configured']:
+                click.echo(f"      {Colors.DIM}unlocks: {', '.join(r['unlocks'])}{Colors.RESET}")
+
+        click.echo()
+        click.echo(f"  {len(configured)}/{len(results)} service(s) configured.")
+        if not live and configured:
+            click.echo(f"  {Colors.DIM}Re-run with --live to validate the keys.{Colors.RESET}")
+        click.echo()
+
+    if invalid:
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']), required=False)
+def completion(shell):
+    """
+    Emit a shell completion script.
+
+    \b
+    Install it by sourcing the output from your shell's startup file:
+        bsot completion zsh  > ~/.bsot-completion.zsh
+        echo 'source ~/.bsot-completion.zsh' >> ~/.zshrc
+
+    \b
+    Or evaluate it directly:
+        eval "$(bsot completion bash)"
+    """
+    import os
+    import shutil
+
+    if not shell:
+        # Infer from $SHELL so the bare command still does something useful.
+        shell_path = os.environ.get('SHELL', '')
+        shell = os.path.basename(shell_path) if shell_path else ''
+        if shell not in ('bash', 'zsh', 'fish'):
+            click.echo(
+                "Error: could not detect your shell; pass one explicitly "
+                "(bash, zsh, or fish).",
+                err=True,
+            )
+            sys.exit(2)
+
+    # Click generates the script from a magic env var on the program itself.
+    from click.shell_completion import get_completion_class
+
+    completion_cls = get_completion_class(shell)
+    if completion_cls is None:
+        click.echo(f"Error: click does not support {shell} completion.", err=True)
+        sys.exit(2)
+
+    prog_name = 'bsot'
+    complete_var = '_BSOT_COMPLETE'
+    click.echo(completion_cls(cli, {}, prog_name, complete_var).source())

@@ -716,3 +716,130 @@ def cve(query, limit, json_output, verbose, minimal):
     click.echo(f"  {Colors.WHITE}More: https://nvd.nist.gov/vuln/search/results?query={quote(query)}{Colors.RESET}")
     click.echo()
 
+
+
+@intel.command()
+@click.argument('technique', required=False)
+@click.option('--search', '-s', 'search_query', help='Search techniques by keyword')
+@click.option('--tactic', '-t', help='List techniques for a tactic (e.g. credential-access)')
+@click.option('--list-tactics', is_flag=True, help='List all tactics with technique counts')
+@click.option('--refresh', is_flag=True, help='Re-download the ATT&CK dataset')
+@click.option('--timeout', default=120, show_default=True, help='Download timeout in seconds')
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def mitre(technique, search_query, tactic, list_tactics, refresh, timeout, json_output):
+    """
+    Look up MITRE ATT&CK techniques.
+
+    \b
+    The dataset is downloaded once and cached for 30 days, so only the first
+    call needs network access.
+
+    \b
+    Examples:
+        bsot intel mitre T1110
+        bsot intel mitre T1110.001
+        bsot intel mitre --search "brute force"
+        bsot intel mitre --tactic credential-access
+        bsot intel mitre --list-tactics
+    """
+    from .mitre import (
+        load_attack_data, get_technique, search_techniques,
+        techniques_by_tactic, list_tactics as get_tactics,
+    )
+    from ..utils import Colors, print_header, print_subheader
+
+    if not any([technique, search_query, tactic, list_tactics]):
+        click.echo("Error: give a technique ID, --search, --tactic, or --list-tactics.", err=True)
+        sys.exit(2)
+
+    try:
+        data = load_attack_data(no_cache=refresh, timeout=timeout)
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
+    if list_tactics:
+        tactics = get_tactics(data)
+        if json_output:
+            click.echo(json_lib.dumps(tactics, indent=2))
+        else:
+            print_header('ATT&CK Tactics')
+            for name, count in tactics.items():
+                click.echo(f"  {Colors.CYAN}{name:24s}{Colors.RESET} {count} technique(s)")
+            click.echo()
+        return
+
+    if tactic:
+        matches = techniques_by_tactic(data, tactic)
+        if json_output:
+            click.echo(json_lib.dumps({'tactic': tactic, 'techniques': matches}, indent=2))
+        elif not matches:
+            click.echo(f"No techniques found for tactic '{tactic}'.", err=True)
+            click.echo("Run 'bsot intel mitre --list-tactics' to see valid tactics.", err=True)
+            sys.exit(1)
+        else:
+            print_header(f"ATT&CK Tactic: {tactic}")
+            for tech in matches:
+                indent = '    ' if tech['is_subtechnique'] else '  '
+                click.echo(f"{indent}{Colors.CYAN}{tech['id']:12s}{Colors.RESET} {tech['name']}")
+            click.echo()
+            click.echo(f"  {len(matches)} technique(s).")
+            click.echo()
+        return
+
+    if search_query:
+        matches = search_techniques(data, search_query)
+        if json_output:
+            click.echo(json_lib.dumps({'query': search_query, 'results': matches}, indent=2))
+        elif not matches:
+            click.echo(f"No techniques matched '{search_query}'.", err=True)
+            sys.exit(1)
+        else:
+            print_header(f"ATT&CK Search: {search_query}")
+            for tech in matches:
+                click.echo(f"  {Colors.CYAN}{tech['id']:12s}{Colors.RESET} {tech['name']}")
+                if tech['tactics']:
+                    click.echo(f"               {Colors.DIM}{', '.join(tech['tactics'])}{Colors.RESET}")
+            click.echo()
+            click.echo(f"  {len(matches)} result(s).")
+            click.echo()
+        return
+
+    # Single technique lookup
+    tech = get_technique(data, technique)
+    if not tech:
+        click.echo(f"Error: technique '{technique}' not found.", err=True)
+        click.echo("Try 'bsot intel mitre --search <keyword>'.", err=True)
+        sys.exit(1)
+
+    if json_output:
+        click.echo(json_lib.dumps(tech, indent=2))
+        return
+
+    print_header(f"{tech['id']}: {tech['name']}")
+    if tech.get('deprecated'):
+        click.echo(f"  {Colors.YELLOW}⚠ This technique is deprecated.{Colors.RESET}\n")
+
+    if tech['tactics']:
+        click.echo(f"  {Colors.BOLD}Tactics:{Colors.RESET} {', '.join(tech['tactics'])}")
+    if tech['platforms']:
+        click.echo(f"  {Colors.BOLD}Platforms:{Colors.RESET} {', '.join(tech['platforms'])}")
+    if tech['url']:
+        click.echo(f"  {Colors.BOLD}Reference:{Colors.RESET} {tech['url']}")
+
+    if tech['description']:
+        print_subheader('Description')
+        for para in tech['description'].split('\n\n')[:3]:
+            click.echo(f"  {para.strip()[:600]}")
+            click.echo()
+
+    if tech['detection']:
+        print_subheader('Detection')
+        click.echo(f"  {tech['detection'][:800]}")
+        click.echo()
+
+    if tech['data_sources']:
+        print_subheader('Data Sources')
+        for source in tech['data_sources'][:10]:
+            click.echo(f"  • {source}")
+        click.echo()

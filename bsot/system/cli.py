@@ -15,8 +15,12 @@ def system():
 
 @system.command()
 @click.option('--suspicious', '-s', is_flag=True, help='Only show suspicious processes')
+@click.option('--vt', 'use_vt', is_flag=True,
+              help='Look up each process binary hash on VirusTotal (needs an API key)')
+@click.option('--vt-all', is_flag=True,
+              help='With --vt, check every process rather than only suspicious ones')
 @click.option('--json', 'json_output', is_flag=True, help='JSON output')
-def processes(suspicious, json_output):
+def processes(suspicious, use_vt, vt_all, json_output):
     """
     List and analyze running processes.
     
@@ -42,9 +46,19 @@ def processes(suspicious, json_output):
         sys.exit(2)
     
     procs = analyzer.list_processes(suspicious_only=suspicious)
-    
+
+    vt_findings = {}
+    if use_vt:
+        vt_findings = _vt_check_processes(procs, check_all=vt_all)
+
     if json_output:
-        click.echo(json_lib.dumps([p.to_dict() for p in procs], indent=2))
+        payload = []
+        for proc in procs:
+            entry = proc.to_dict()
+            if proc.exe in vt_findings:
+                entry['virustotal'] = vt_findings[proc.exe]
+            payload.append(entry)
+        click.echo(json_lib.dumps(payload, indent=2))
         return
     
     print_header("Running Processes")
@@ -63,6 +77,7 @@ def processes(suspicious, json_output):
             click.echo(f"      Path: {proc.exe[:60]}..." if len(proc.exe) > 60 else f"      Path: {proc.exe}")
             for reason in proc.suspicious_reasons:
                 click.echo(f"      {Colors.RED}• {reason}{Colors.RESET}")
+            _echo_vt_verdict(vt_findings.get(proc.exe), Colors)
     
     # Show top processes by CPU
     print_subheader("Top Processes by CPU")
@@ -370,3 +385,103 @@ def persistence(user_only, suspicious_only, json_output):
 
     if suspicious_count:
         sys.exit(1)
+
+
+def _vt_check_processes(procs, check_all: bool = False) -> dict:
+    """
+    Hash each process binary and look the hashes up on VirusTotal.
+
+    Returns a mapping of executable path to a VT summary. Only suspicious
+    processes are checked by default: VirusTotal's public API allows 4 lookups
+    per minute, so scanning every process would take many minutes.
+    """
+    import hashlib
+    from pathlib import Path
+    from ..config import config as global_config
+    from ..utils import Colors
+
+    api_key = global_config.virustotal_api_key
+    if not api_key:
+        click.echo(
+            f"{Colors.YELLOW}Warning: no VirusTotal API key configured; "
+            f"skipping VT lookups. Set VIRUSTOTAL_API_KEY or run "
+            f"'bsot config set virustotal_api_key <key>'.{Colors.RESET}",
+            err=True,
+        )
+        return {}
+
+    from ..intel.sources.virustotal import VirusTotalClient
+
+    client = VirusTotalClient(api_key)
+    targets = [p for p in procs if p.exe and (check_all or p.is_suspicious)]
+
+    # Deduplicate by path: many processes share one binary.
+    unique_paths = []
+    seen = set()
+    for proc in targets:
+        if proc.exe not in seen:
+            seen.add(proc.exe)
+            unique_paths.append(proc.exe)
+
+    if not unique_paths:
+        return {}
+
+    if len(unique_paths) > 4:
+        click.echo(
+            f"{Colors.DIM}Checking {len(unique_paths)} binaries against VirusTotal "
+            f"(public API allows 4/minute, so this may take a while)...{Colors.RESET}",
+            err=True,
+        )
+
+    findings = {}
+    for path in unique_paths:
+        try:
+            digest = hashlib.sha256()
+            with open(path, 'rb') as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            file_hash = digest.hexdigest()
+        except (OSError, PermissionError) as e:
+            findings[path] = {'error': f'could not hash: {e}'}
+            continue
+
+        try:
+            result = client.lookup_hash(file_hash)
+        except Exception as e:
+            findings[path] = {'sha256': file_hash, 'error': str(e)}
+            continue
+
+        if result is None:
+            findings[path] = {'sha256': file_hash, 'found': False}
+            continue
+
+        findings[path] = {
+            'sha256': file_hash,
+            'found': True,
+            'malicious': result.malicious,
+            'suspicious': result.suspicious,
+            'detection_ratio': result.detection_ratio,
+            'is_malicious': result.is_malicious,
+        }
+
+    return findings
+
+
+def _echo_vt_verdict(verdict: dict, Colors) -> None:
+    """Print a one-line VirusTotal verdict beneath a process entry."""
+    if not verdict:
+        return
+    if verdict.get('error'):
+        click.echo(f"      {Colors.DIM}VT: {verdict['error']}{Colors.RESET}")
+    elif not verdict.get('found'):
+        # An unknown hash is itself notable for a binary running on a host.
+        click.echo(f"      {Colors.YELLOW}VT: hash not in VirusTotal{Colors.RESET}")
+    elif verdict.get('is_malicious'):
+        click.echo(
+            f"      {Colors.RED}{Colors.BOLD}VT: MALICIOUS "
+            f"({verdict['detection_ratio']}){Colors.RESET}"
+        )
+    elif verdict.get('suspicious'):
+        click.echo(f"      {Colors.YELLOW}VT: suspicious ({verdict['detection_ratio']}){Colors.RESET}")
+    else:
+        click.echo(f"      {Colors.GREEN}VT: clean ({verdict['detection_ratio']}){Colors.RESET}")
