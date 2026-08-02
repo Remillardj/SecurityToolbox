@@ -38,16 +38,40 @@ MAX_OUTPUT_CHARS = 200_000
 
 # Commands intentionally kept off the agent's tool surface (see
 # bsot/agent/bridge.py: config/cache/completion manage local secrets and
-# shell setup, and `agent` is the runtime's own surface). A path that
-# resolves outside the catalogue must never run just because a caller didn't
-# supply metadata - the catalogue is the enforcement point for "the agent may
-# only call what bridge.py exposed," not merely a convenience lookup.
+# shell setup, and `agent` is the runtime's own surface). When run_command
+# has to look a path up itself (param_meta/supports_json not supplied), a
+# path outside the catalogue is refused rather than run with guessed-empty
+# metadata and no --json. This check is scoped to that lookup path only: a
+# caller that supplies metadata explicitly - Task 10's runtime, which
+# already holds the catalogue - is trusted and bypasses it entirely, same as
+# before. bsot.agent.safety.tier_for fails closed for any path it doesn't
+# recognize regardless of which route got it there.
 CATALOGUE_REFUSED_EXIT_CODE = 126
 
 
 @dataclass
 class CommandResult:
-    """Outcome of one command invocation."""
+    """
+    Outcome of one command invocation.
+
+    `exit_code` mixes three dialects, deliberately: the real bsot/Click exit
+    code (0 clean, 1 findings, 2 usage error, ...) when the child actually
+    ran and exited on its own; an executor-invented shell-style convention
+    when it didn't (124 timed out, 126 refused - path not in the agent's
+    tool catalogue, see CATALOGUE_REFUSED_EXIT_CODE, 127 binary not found);
+    and a negative POSIX signal number when the child was killed outright
+    (Python's `subprocess` convention: -N means killed by signal N, e.g. -9
+    for SIGKILL). `.error` carries the human-readable label for every
+    non-(0,1) case - read that, not just the number, to know what actually
+    happened.
+
+    `truncated` is True when either stream was cut to MAX_OUTPUT_CHARS.
+    Trust this field, not the in-stream "[truncated: ...]" marker text:
+    `stdout`/`stderr` is adversary-controlled content (malware strings,
+    phishing text, log lines), and an attacker could forge a lookalike
+    marker to claim output was cut when it wasn't. `truncated` lives on the
+    trusted channel instead.
+    """
 
     command: str
     exit_code: int
@@ -55,6 +79,7 @@ class CommandResult:
     stderr: str
     parsed: Optional[Any] = None
     error: str = ""
+    truncated: bool = False
 
     def summary(self) -> str:
         return f"{self.command} -> exit {self.exit_code}"
@@ -178,7 +203,16 @@ def _render_args(
             else:
                 # A non-boolean for a flag param is never coerced by
                 # truthiness: the string "false" is truthy in Python and
-                # would otherwise turn the flag ON.
+                # would otherwise turn the flag ON. Rejecting it means the
+                # flag is simply omitted, i.e. the command runs in its
+                # *default* mode rather than "false". For a flag that
+                # defaults True this isn't a no-op - but every
+                # security-relevant flag in this codebase defaults False
+                # (phishing url --expand, malware deobfuscate --stdin,
+                # network ct-subdomains --resolve, auth password-analyze
+                # --check-breach), so the failure mode here is always "ran
+                # more conservatively than asked," never "ran the dangerous
+                # thing anyway."
                 problems.append(
                     f"parameter {name!r} is a flag and requires true/false, "
                     f"got {value!r} - omitted rather than guessed"
@@ -220,6 +254,22 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> Tuple[str, bool]:
     return text[:limit], True
 
 
+def _truncate_with_marker(text: str, label: str) -> Tuple[str, bool]:
+    """
+    `_truncate` plus an in-stream human-readable marker. The marker is a
+    convenience for a human or model skimming `stdout`/`stderr` directly -
+    it is untrusted (see CommandResult.truncated for the field a caller
+    should actually trust the fact from).
+    """
+    truncated_text, cut = _truncate(text)
+    if cut:
+        truncated_text += (
+            f"\n... [truncated: {label} was {len(text)} chars, "
+            f"kept first {MAX_OUTPUT_CHARS}]"
+        )
+    return truncated_text, cut
+
+
 def _decode(maybe_bytes) -> str:
     """TimeoutExpired.stdout/.stderr may be bytes or str depending on platform."""
     if maybe_bytes is None:
@@ -246,12 +296,19 @@ def run_command(
     function trusts them completely and does not re-check the catalogue.
     When either is omitted, this function looks the command up in the
     catalogue itself as a convenience for direct calls and tests. If that
-    lookup fails to find the path, the command is refused outright rather
-    than run with guessed-empty metadata and no --json: `bridge.py`
-    deliberately excludes `config`/`cache`/`completion`/`agent` from the
-    catalogue, and the executor is the layer that has to make that exclusion
-    actually mean "does not run" rather than "the agent didn't happen to
-    guess flags for it."
+    lookup fails to find the path, the command is refused outright (see
+    CATALOGUE_REFUSED_EXIT_CODE) rather than run with guessed-empty metadata
+    and no --json. This only guards the auto-lookup convenience path: a
+    caller that supplies param_meta/supports_json explicitly is trusted and
+    skips the check entirely.
+
+    Decoding uses `errors="replace"` so a byte sequence invalid for the
+    parent's locale-derived encoding (e.g. non-ASCII output under a
+    C/POSIX locale - common under Docker, cron, systemd, CI) can never
+    raise `UnicodeDecodeError` instead of returning a result. This is
+    silent: a U+FFFD in `stdout`/`stderr` may be a decode replacement
+    rather than something the tool itself emitted, and the two are
+    indistinguishable from the result alone.
     """
     params = params or {}
 
@@ -307,45 +364,46 @@ def run_command(
         )
     except subprocess.TimeoutExpired as e:
         # Partial output captured before the kill is still evidence; discard
-        # neither stream.
+        # neither stream. A command with no inherent output bound is also
+        # the one most likely to run out the clock, so the cap below must
+        # apply here too - not just on normal completion.
+        timeout_stdout, timeout_stdout_cut = _truncate_with_marker(
+            _decode(e.stdout), "output"
+        )
+        timeout_stderr, timeout_stderr_cut = _truncate_with_marker(
+            _decode(e.stderr), "stderr"
+        )
         return CommandResult(
             command=command_str,
             exit_code=124,
-            stdout=_decode(e.stdout),
-            stderr=_decode(e.stderr),
+            stdout=timeout_stdout,
+            stderr=timeout_stderr,
             error=f"timed out after {timeout}s",
+            truncated=timeout_stdout_cut or timeout_stderr_cut,
         )
     except (OSError, FileNotFoundError) as e:
         return CommandResult(
             command=command_str, exit_code=127, stdout="", stderr="", error=str(e)
         )
 
-    stdout_text, stdout_truncated = _truncate(completed.stdout)
-    stderr_text, stderr_truncated = _truncate(completed.stderr)
-    if stdout_truncated:
-        stdout_text += (
-            f"\n... [truncated: output was {len(completed.stdout)} chars, "
-            f"kept first {MAX_OUTPUT_CHARS}]"
-        )
-    if stderr_truncated:
-        stderr_text += (
-            f"\n... [truncated: stderr was {len(completed.stderr)} chars, "
-            f"kept first {MAX_OUTPUT_CHARS}]"
-        )
+    stdout_text, stdout_cut = _truncate_with_marker(completed.stdout, "output")
+    stderr_text, stderr_cut = _truncate_with_marker(completed.stderr, "stderr")
 
     result = CommandResult(
         command=command_str,
         exit_code=completed.returncode,
         stdout=stdout_text,
         stderr=stderr_text,
+        truncated=stdout_cut or stderr_cut,
     )
 
     # Only parse when the command was actually asked for JSON: a plain-text
     # command's stdout can coincidentally be valid JSON (`intel defang 123`
     # emits the bare string "123", which json.loads happily turns into the
     # int 123) - never parsed since it isn't the documented output shape.
-    # A truncated stream is never valid JSON, so don't try.
-    if supports_json and not stdout_truncated and stdout_text.strip():
+    # A truncated stdout is never valid JSON, so don't try (a truncated
+    # stderr doesn't block parsing a complete stdout).
+    if supports_json and not stdout_cut and stdout_text.strip():
         try:
             result.parsed = json.loads(stdout_text)
         except json.JSONDecodeError:

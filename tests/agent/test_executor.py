@@ -21,9 +21,13 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import bsot.agent.executor as executor
 from bsot.agent.executor import CommandResult, run_command
+
+# tests/agent/test_executor.py -> tests/agent -> tests -> repo root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _write_script(tmp_path, name, body):
@@ -32,6 +36,26 @@ def _write_script(tmp_path, name, body):
     script.write_text(body)
     script.chmod(0o755)
     return script
+
+
+def _nested_env(**overrides):
+    """
+    Env for a nested `sys.executable` interpreter that must load *this*
+    working tree's `bsot`, not whatever `bsot` package happens to be
+    resolvable elsewhere on the child's default sys.path (e.g. a
+    non-editable install in site-packages). Prepending the repo root to
+    PYTHONPATH makes that explicit rather than relying on ambient editable-
+    install behavior, which a test spawning a real subprocess should not
+    assume: a test that can only fail in one specific dev environment is
+    worse than no test.
+    """
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(REPO_ROOT) if not existing else str(REPO_ROOT) + os.pathsep + existing
+    )
+    env.update(overrides)
+    return env
 
 
 class TestRunCommand:
@@ -406,6 +430,7 @@ class TestStdinIsolation:
             input="ANALYST-SECRET-INPUT\n",
             capture_output=True,
             text=True,
+            env=_nested_env(),
             timeout=30,
         )
 
@@ -450,12 +475,11 @@ class TestEncodingSafety:
             "sys.stdout.buffer.write(json.dumps(out).encode('ascii'))\n"
         )
 
-        env = dict(os.environ, LC_ALL="C", LANG="C", PYTHONUTF8="0")
         completed = subprocess.run(
             [sys.executable, str(probe)],
             capture_output=True,
             text=True,
-            env=env,
+            env=_nested_env(LC_ALL="C", LANG="C", PYTHONUTF8="0"),
             timeout=30,
         )
 
@@ -481,9 +505,45 @@ class TestOutputBounds:
         assert result.exit_code == 0
         assert len(result.stdout) < 300000
         assert "truncated" in result.stdout
+        assert result.truncated is True
         # A truncated stream is never valid JSON; parsing must not be
         # attempted (and must not silently hand back a mangled structure).
         assert result.parsed is None
+
+    def test_timeout_path_is_bounded_too(self, tmp_path, monkeypatch):
+        """
+        Regression: `_truncate` was only ever applied after a normal
+        `subprocess.run` return, not in the `TimeoutExpired` branch. A
+        command with no inherent output bound (the case the cap exists for
+        in the first place) is also the one most likely to run out the
+        clock: flood stdout, then hang. Before the fix this came back with
+        the full, uncapped stream and exit_code=124.
+        """
+        script = _write_script(
+            tmp_path,
+            "flood_then_hang.py",
+            "#!/usr/bin/env python3\n"
+            "import sys, time\n"
+            'sys.stdout.write("A" * 300000)\n'
+            "sys.stdout.flush()\n"
+            "time.sleep(5)\n",
+        )
+        monkeypatch.setattr(executor, "_resolve_binary", lambda: str(script))
+
+        result = run_command([], {}, param_meta={}, supports_json=False, timeout=0.5)
+
+        assert result.exit_code == 124
+        assert len(result.stdout) < 300000
+        assert "truncated" in result.stdout
+        assert result.truncated is True
+
+    def test_normal_small_output_is_not_flagged_truncated(self, tmp_path):
+        target = tmp_path / "sample.txt"
+        target.write_text("hello")
+
+        result = run_command(["file", "hash"], {"files": [str(target)]})
+
+        assert result.truncated is False
 
 
 class TestFailureModes:
