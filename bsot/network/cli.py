@@ -218,7 +218,12 @@ def dns(domain, json_output):
     if result.aaaa_records:
         click.echo(f"  AAAA: {', '.join(result.aaaa_records)}")
     if result.mx_records:
-        click.echo(f"  MX: {', '.join(f'{r['priority']} {r['host']}' for r in result.mx_records[:3])}")
+        # Built outside the f-string: reusing the outer quote inside a nested
+        # f-string is PEP 701 syntax and is a SyntaxError before Python 3.12.
+        mx_rendered = ', '.join(
+            "{} {}".format(r['priority'], r['host']) for r in result.mx_records[:3]
+        )
+        click.echo(f"  MX: {mx_rendered}")
     if result.ns_records:
         click.echo(f"  NS: {', '.join(result.ns_records[:3])}")
     

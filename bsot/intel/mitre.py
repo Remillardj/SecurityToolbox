@@ -100,15 +100,15 @@ def load_attack_data(no_cache: bool = False, timeout: int = 120) -> dict:
         response = requests.get(ATTACK_BUNDLE_URL, timeout=timeout)
         response.raise_for_status()
         bundle = response.json()
-    except requests.exceptions.Timeout:
+    except requests.exceptions.Timeout as e:
         raise RuntimeError(
             f"Timed out fetching the ATT&CK dataset after {timeout}s. "
             "It is a large download; retry or raise --timeout."
-        )
+        ) from e
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Could not fetch the ATT&CK dataset: {e}")
-    except ValueError:
-        raise RuntimeError("The ATT&CK dataset was not valid JSON.")
+        raise RuntimeError(f"Could not fetch the ATT&CK dataset: {e}") from e
+    except ValueError as e:
+        raise RuntimeError("The ATT&CK dataset was not valid JSON.") from e
 
     data = _condense(bundle)
     if not data["techniques"]:

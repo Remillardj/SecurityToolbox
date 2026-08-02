@@ -1,0 +1,71 @@
+name: CI
+
+# Runs only on trusted inputs: no github.event.* values are interpolated into
+# any run: block, so there is no injection surface from PR or issue text.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # F catches undefined names and unused imports, E9 syntax and runtime
+      # errors. A NameError in a rarely-taken branch fails here, not in prod.
+      - name: Lint
+        run: ruff check bsot/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest
+
+      - name: Verify the CLI runs
+        run: |
+          bsot --version
+          bsot --help
+          bsot config check
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build distributions
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*

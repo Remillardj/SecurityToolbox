@@ -1,124 +1,229 @@
-# BSOT - Blue Security Ops Toolkit
+# BSOT — Blue Security Ops Toolkit
 
-A comprehensive command-line security toolkit for system administrators, security professionals, and DevOps engineers. BSOT provides practical, easy-to-use tools for file analysis, network scanning, data decoding, authentication auditing, system monitoring, and log analysis.
+A command-line toolkit for blue team security operations. Analyze phishing
+emails, enrich IOCs, triage malware, investigate logs, audit hosts, and build
+case reports — all from the terminal.
 
-## Features
-
-### File Security (`bsot file`)
-- **permissions** - Scan for files with overly permissive permissions
-- **suid-finder** - Find SUID/SGID binaries (privilege escalation vectors)
-- **cred-scan** - Detect hardcoded credentials and secrets in files
-- **hash-check** - Calculate and verify file hashes
-
-### Network Security (`bsot network`)
-- **ssl-check** - Verify SSL/TLS certificates and check security configuration
-- **port-scan** - Scan for open ports on target hosts
-- **web-headers** - Audit HTTP security headers
-- **dns-lookup** - Perform DNS security lookups (SPF, DMARC, etc.)
-
-### Data Analysis (`bsot data`)
-- **url-decode** - Decode URL-encoded strings
-- **base64-decode** - Decode base64-encoded data
-- **hex-decode** - Decode hexadecimal strings
-- **email-header** - Analyze email headers for security issues
-
-### Authentication (`bsot auth`)
-- **password-analyze** - Analyze password strength and security
-- **jwt-decode** - Decode and analyze JWT tokens
-- **ssh-audit** - Audit SSH configuration for security issues
-
-### System Monitoring (`bsot system`)
-- **process-check** - Detect suspicious processes (with optional VirusTotal integration)
-
-### Log Analysis (`bsot logs`)
-- **analyze** - Comprehensive log analysis with attack detection, brute force identification, and pattern matching
+Every command supports `--json`, so results pipe cleanly into `jq`, a SIEM, or
+whatever comes next in your pipeline.
 
 ## Installation
 
 ```bash
-# Install from source
 git clone git@github.com:Remillardj/SecurityToolbox.git
 cd SecurityToolbox
 pip install -e .
-
-# Or install requirements manually
-pip install -r requirements.txt
+bsot --help
 ```
 
-## Quick Start Examples
+Optional features live behind extras:
 
 ```bash
-# File security
+pip install -e ".[full]"      # WHOIS, EXIF, PDF, .msg parsing, rich output
+pip install -e ".[malware]"   # PE analysis, YARA, fuzzy hashing
+pip install -e ".[report]"    # AI analysis and report generation
+```
+
+Requires Python 3.9 or newer.
+
+## Configuration
+
+API keys come from environment variables or `~/.bsot/config.json`:
+
+```bash
+export VIRUSTOTAL_API_KEY=your_key
+export ABUSEIPDB_API_KEY=your_key
+export ANTHROPIC_API_KEY=your_key   # for AI-assisted analysis
+```
+
+To see what is configured and what each key unlocks:
+
+```bash
+bsot config check          # what is set
+bsot config check --live   # validate each key against the provider
+```
+
+Named profiles let you keep separate key sets:
+
+```bash
+bsot config create-profile work
+bsot --profile work intel enrich 1.2.3.4
+```
+
+## Shell completion
+
+```bash
+bsot completion zsh > ~/.bsot-completion.zsh
+echo 'source ~/.bsot-completion.zsh' >> ~/.zshrc
+```
+
+`bash` and `fish` are also supported.
+
+## Commands
+
+### Phishing (`bsot phishing`)
+| Command | Purpose |
+|---|---|
+| `analyze` | Full email analysis |
+| `headers` | Parse and score email headers |
+| `extract-iocs` | Pull IOCs out of an email |
+| `reputation` | Check extracted IOCs against reputation sources |
+| `ai-analyze` | AI-assisted assessment |
+
+### Threat intelligence (`bsot intel`)
+| Command | Purpose |
+|---|---|
+| `enrich` | Enrich an IOC across configured sources |
+| `bulk` | Enrich many IOCs, rate-limited per source |
+| `mitre` | Look up ATT&CK techniques by ID, keyword, or tactic |
+| `cve` | Search CVEs by keyword or ID |
+| `whois` | Domain WHOIS |
+| `geoip` | IP geolocation |
+| `defang` / `refang` | Make IOCs safe (or unsafe) to paste |
+
+### Logs (`bsot logs`)
+| Command | Purpose |
+|---|---|
+| `analyze` | Detect attack patterns, tagged with ATT&CK techniques |
+| `timeline` | Build an investigative timeline |
+| `parse` | Parse and normalize syslog, JSON, CLF, CEF |
+| `stats` | Summary statistics |
+| `ai-analyze` | AI-assisted log review |
+
+### Files (`bsot file`)
+| Command | Purpose |
+|---|---|
+| `hash` | Calculate and verify hashes |
+| `identify` | Identify type by magic bytes, flag extension mismatches |
+| `strings` | Extract strings, highlighting interesting ones |
+| `entropy` | Entropy analysis for packing and encryption |
+| `metadata` | EXIF, PDF, and Office metadata |
+| `cred-scan` | Find hardcoded credentials |
+| `permissions` | Find world-writable files and unsafe directories |
+| `suid-finder` | Find SUID/SGID binaries |
+| `baseline` / `diff` | Record a hash manifest and detect drift |
+
+### Network (`bsot network`)
+| Command | Purpose |
+|---|---|
+| `ssl-check` | Certificate and TLS configuration analysis |
+| `dns` | DNS records plus SPF/DKIM/DMARC |
+| `headers` | HTTP security header audit |
+| `ports` | Port scan |
+| `ct-subdomains` | Passive subdomain enumeration via Certificate Transparency |
+
+### Malware (`bsot malware`)
+| Command | Purpose |
+|---|---|
+| `pe` | PE structure analysis |
+| `yara` | Scan with YARA rules |
+| `strings` | String analysis |
+| `deobfuscate` | Unwrap obfuscated scripts |
+| `ioc` | Extract IOCs from a sample |
+| `compare` | Fuzzy-hash comparison |
+| `submit` | Submit to a sandbox |
+
+### System (`bsot system`)
+| Command | Purpose |
+|---|---|
+| `processes` | List processes and flag suspicious ones (`--vt` for VirusTotal) |
+| `connections` | Active network connections |
+| `persistence` | Enumerate launch agents, systemd units, and cron |
+
+### Data (`bsot data`)
+| Command | Purpose |
+|---|---|
+| `magic` | Auto-detect and recursively decode layered encodings |
+| `decode` / `encode` | base64, hex, URL, HTML, unicode, ROT13, punycode |
+| `hash` | Hash a string |
+| `timestamp` | Convert between timestamp formats |
+| `regex` | Test a pattern against sample data |
+| `format` | Pretty-print JSON and XML |
+
+### Authentication (`bsot auth`)
+| Command | Purpose |
+|---|---|
+| `password-analyze` | Strength analysis with breach lookup |
+| `jwt-decode` | Decode and audit a JWT |
+| `ssh-audit` | Audit sshd config against OpenSSH defaults |
+
+### Incident response (`bsot ir`)
+| Command | Purpose |
+|---|---|
+| `collect` | Collect host artifacts |
+| `hash-tree` | Hash a directory tree for evidence |
+| `contain` / `block` / `unblock` | Cloudflare containment actions |
+| `bulk-block` | Block many indicators at once |
+| `list` | List active blocks |
+
+### Cases and reports (`bsot case`, `bsot report`)
+| Command | Purpose |
+|---|---|
+| `new` / `open` / `close` | Case lifecycle |
+| `add` / `note` / `ioc` | Attach evidence |
+| `timeline` / `status` | Review a case |
+| `generate` | Produce a report |
+| `package` | Package a case for handoff |
+
+### OSINT (`bsot osint`)
+| Command | Purpose |
+|---|---|
+| `domain` | Domain profile: WHOIS, DNS, email security, SSL, subdomains |
+
+## Examples
+
+```bash
+# Triage a suspicious email
+bsot phishing analyze suspicious.eml
+
+# Enrich an indicator and keep the JSON
+bsot intel enrich 1.2.3.4 --json > enrichment.json
+
+# What does this ATT&CK technique mean?
+bsot intel mitre T1110.001
+
+# Unwrap a layered payload
+bsot data magic "H4sIAAAAAAAC/8tIzcnJVyjPL8pJAQCFEUoNCwAAAA=="
+
+# Audit a host
 bsot file permissions /var/www
 bsot file suid-finder /usr/bin
-bsot file cred-scan ./my-project --extensions "py,js,env"
-bsot file hash-check download.iso --compare abc123...
-
-# Network security
-bsot network ssl-check google.com
-bsot network port-scan 192.168.1.1 --ports 1-1024
-bsot network web-headers https://example.com
-bsot network dns-lookup example.com
-
-# Data analysis
-bsot data url-decode "Hello%20World%21"
-bsot data base64-decode "SGVsbG8gV29ybGQ="
-bsot data hex-decode "48656c6c6f"
-bsot data email-header suspicious_email.txt
-
-# Authentication
-bsot auth password-analyze "MyP@ssw0rd123"
-bsot auth jwt-decode eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 bsot auth ssh-audit /etc/ssh/sshd_config
+bsot system persistence
 
-# System monitoring
-bsot system process-check --vt-api-key YOUR_KEY
+# Watch a directory for tampering
+bsot file baseline /etc -o etc-baseline.json
+bsot file diff etc-baseline.json
 
-# Log analysis
-bsot logs analyze /var/log/auth.log
-bsot logs analyze access.log --focus brute_force
-bsot logs analyze app.log --output json
+# Passive recon
+bsot network ct-subdomains example.com --resolve
+bsot osint domain example.com --deep
 ```
 
-## Environment Variables
+## Exit codes
 
-- `VT_API_KEY` - VirusTotal API key for malware scanning (optional)
+Commands are scriptable: `0` means clean, `1` means findings were reported,
+and `2` means the command could not run (bad input, missing dependency,
+unreachable service).
 
-## Command Structure
-
-All commands follow this pattern:
-```
-bsot <category> <command> [arguments] [options]
-```
-
-Categories:
-- `file` - File security analysis
-- `network` - Network security scanning
-- `data` - Data encoding/decoding
-- `auth` - Authentication security
-- `system` - System monitoring
-- `logs` - Log analysis
-
-## Help
-
-Get help for any command:
 ```bash
-bsot --help
-bsot file --help
-bsot network ssl-check --help
+bsot file cred-scan . && echo "no secrets found"
 ```
 
-## Requirements
+## Development
 
-- Python 3.7+
-- click>=8.0.0
-- requests>=2.25.0
-- dnspython>=2.1.0
+```bash
+pip install -e ".[dev]"
+pytest
+ruff check bsot/ tests/
+```
 
 ## License
+
 Copyright (c) 2025 Jaryd Remillard. All rights reserved.
 
-This software is licensed for personal, non-commercial use only. You may use and modify the software for private purposes, but distribution is prohibited.
+This software is licensed for personal, non-commercial use only. You may use
+and modify the software for private purposes, but distribution is prohibited.
 
 Key restrictions:
 
@@ -130,10 +235,18 @@ Key restrictions:
 
 ❌ No commercial use
 
-Commercial licensing: For commercial use or distribution rights, contact jaryd.remillard@gmail.com
+Commercial licensing: For commercial use or distribution rights, contact
+jaryd.remillard@gmail.com
 
 See the LICENSE file for full terms.
 
-## Contributing
+## Issues
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+Bug reports and feature requests are welcome via GitHub issues. Because the
+license above does not grant redistribution rights, please get in touch at
+jaryd.remillard@gmail.com before submitting code.
+
+## Links
+
+- **Website**: [bluesecurityops.com](https://bluesecurityops.com)
+- **GitHub**: [github.com/Remillardj/SecurityToolbox](https://github.com/Remillardj/SecurityToolbox)

@@ -572,7 +572,7 @@ def permissions(directory, recursive, group_writable, show_all, json_output):
             })
 
     if recursive:
-        for dirpath, dirnames, filenames in os.walk(root_path, onerror=lambda e: None):
+        for dirpath, _dirnames, filenames in os.walk(root_path, onerror=lambda e: None):
             record(Path(dirpath))
             for name in filenames:
                 record(Path(dirpath) / name)
@@ -646,7 +646,7 @@ def suid_finder(directory, known, json_output):
     }
 
     results = []
-    for dirpath, dirnames, filenames in os.walk(directory, onerror=lambda e: None):
+    for dirpath, _dirnames, filenames in os.walk(directory, onerror=lambda e: None):
         for name in filenames:
             path = Path(dirpath) / name
             try:

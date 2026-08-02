@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bsot"
+version = "2.1.0"
+description = "Blue Security Ops Toolkit - security CLI for blue team operations"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Jaryd Remillard", email = "jaryd.remillard@gmail.com" }]
+keywords = [
+    "security", "phishing", "threat-intelligence", "blue-team",
+    "incident-response", "forensics", "secrets-detection",
+    "malware-analysis", "yara", "pe-analysis", "ioc-extraction",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "Topic :: System :: Monitoring",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "click>=8.0.0",
+    "requests>=2.25.0",
+    "dnspython>=2.1.0",
+    "python-dateutil>=2.8.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "python-whois>=0.8.0",
+    "PyPDF2>=3.0.0",
+    "exifread>=3.0.0",
+    "python-magic>=0.4.24",
+    "extract-msg>=0.36.0",
+    "rich>=10.0.0",
+]
+malware = [
+    "pefile>=2023.2.7",
+    "yara-python>=4.3.0",
+    # ssdeep needs the libfuzzy system package:
+    #   apt-get install libfuzzy-dev   (Debian/Ubuntu)
+    #   brew install ssdeep            (macOS)
+    # "ssdeep>=3.4",
+    "py-tlsh>=4.7.2",
+]
+report = [
+    "anthropic>=0.40.0",
+    "openai>=1.10.0",
+    "markdown>=3.5.0",
+    # "pyzipper>=0.3.6",  # encrypted ZIP packaging
+]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://bluesecurityops.com"
+Repository = "https://github.com/Remillardj/SecurityToolbox"
+
+[project.scripts]
+bsot = "bsot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bsot", "bsot.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# The CI gate covers errors that break at runtime: F (undefined names, unused
+# imports), E9 (syntax errors, including version-incompatible syntax under
+# target-version), and E4/E7. Bugbear (B) findings are code-quality and mostly
+# predate this config, so they are surfaced by `ruff check --select B` on
+# demand rather than gating every push.
+select = ["F", "E4", "E7", "E9"]
+ignore = ["E741", "E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

@@ -147,7 +147,7 @@ bsot logs ai-analyze -f auth.log --focus attack
 bsot network ssl-check example.com
 
 # Decode data
-bsot data decode -e base64 "SGVsbG8gV29ybGQ="
+bsot data decode base64 "SGVsbG8gV29ybGQ="
 ```
 
 ## Performance
