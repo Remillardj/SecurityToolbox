@@ -7,11 +7,12 @@ constructor, not by asking the model to behave.
 
 This module is deliberately provider-agnostic and dependency-free: it must
 never import bridge, safety, executor, or anything else from the wider `bsot`
-package. `RECORD_FINDING_TOOL` and `record_finding()` below are the tool half
-of that contract - the runtime (Task 10) and the deferred-tool loader
-(Task 11) wire them in, but this module has no idea either exists.
+package. `build_record_finding_tool()` and `record_finding()` below are the
+tool half of that contract - the runtime (Task 10) and the deferred-tool
+loader (Task 11) wire them in, but this module has no idea either exists.
 """
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List
 
@@ -51,9 +52,9 @@ class Finding:
     confidence: str = "medium"
 
     def __post_init__(self):
-        # claim: unvalidated, an empty or non-str claim asserts nothing but
-        # still inflates the finding count and renders as an empty bullet
-        # in the case. Guarded the same way as source_command below.
+        # claim: an empty or non-str claim would assert nothing while still
+        # inflating the finding count and rendering as an empty bullet in
+        # the case, so it is guarded the same way as source_command below.
         if not isinstance(self.claim, str):
             raise TypeError(
                 f"Finding.claim must be str, got {type(self.claim).__name__}"
@@ -76,6 +77,20 @@ class Finding:
             raise UnsourcedFinding(
                 f"finding {self.claim!r} has no source command; every claim "
                 f"must cite the command that produced it"
+            )
+
+        # exit_code: the schema declares "type": "integer", but nothing
+        # enforced that a JSON `null`, the string "0", or a dict couldn't
+        # slip through and later break a downstream check like
+        # `if finding["exit_code"] != 0`. isinstance(True, int) is True in
+        # Python (bool subclasses int) - bool is rejected explicitly rather
+        # than silently accepted as 0/1, since a boolean is not a process
+        # return code and the rest of this module already treats "the right
+        # Python type but the wrong thing" as invalid (True is rejected for
+        # claim/source_command above for the same reason).
+        if isinstance(self.exit_code, bool) or not isinstance(self.exit_code, int):
+            raise TypeError(
+                f"Finding.exit_code must be int, got {type(self.exit_code).__name__}"
             )
 
         # evidence: must be a real string. Without this guard, bytes (e.g.
@@ -163,9 +178,19 @@ class FindingLog:
 # it publishes the schema and a plain-dict-in, plain-dict-out handler.
 # Wiring dispatch (Task 10) and exempting this tool from deferred loading
 # (Task 11) both happen elsewhere.
+#
+# `build_record_finding_tool()` is the public surface, not a module-level
+# dict: a plain dict handed out by reference would let one caller's in-place
+# edit (e.g. Task 11 stripping "_"-prefixed keys before the catalogue reaches
+# the model) leak into every other caller for the life of the process -
+# including through the nested input_schema/properties dicts and the
+# enum/required lists, which a shallow MappingProxyType would not protect.
+# deepcopy sidesteps that instead of trying to freeze an arbitrarily nested
+# structure; callers still get a plain dict, exactly the shape bridge.py's
+# tool schemas already are, and are free to mutate their own copy.
 # --------------------------------------------------------------------------
 
-RECORD_FINDING_TOOL: Dict[str, Any] = {
+_RECORD_FINDING_TOOL_TEMPLATE: Dict[str, Any] = {
     "name": "record_finding",
     "description": (
         "Record one investigative finding in this case. Every finding must "
@@ -211,6 +236,11 @@ RECORD_FINDING_TOOL: Dict[str, Any] = {
         "required": ["claim", "source_command", "exit_code"],
     },
 }
+
+
+def build_record_finding_tool() -> Dict[str, Any]:
+    """A fresh copy of the record_finding tool schema (see note above)."""
+    return copy.deepcopy(_RECORD_FINDING_TOOL_TEMPLATE)
 
 
 def record_finding(log: FindingLog, params: Dict[str, Any]) -> Dict[str, Any]:

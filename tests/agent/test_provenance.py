@@ -5,10 +5,10 @@ import dataclasses
 import pytest
 
 from bsot.agent.provenance import (
-    RECORD_FINDING_TOOL,
     Finding,
     FindingLog,
     UnsourcedFinding,
+    build_record_finding_tool,
     record_finding,
 )
 
@@ -77,6 +77,17 @@ class TestFinding:
                 claim="x", source_command="bsot file hash a",
                 exit_code=0, evidence=bad,
             )
+
+    @pytest.mark.parametrize("bad", [None, "0", "failed", {"code": 0}, True, False])
+    def test_rejects_non_int_exit_code(self, bad):
+        """
+        Judgment call: bool is rejected even though it's an int subclass.
+        A JSON `true`/`false` exit_code is a plausible malformed tool call,
+        and a boolean is not a process return code even though Python's
+        isinstance(True, int) says otherwise.
+        """
+        with pytest.raises(TypeError):
+            Finding(claim="x", source_command="bsot file hash a", exit_code=bad)
 
     def test_is_frozen(self):
         finding = Finding(claim="x", source_command="bsot file hash a", exit_code=0)
@@ -178,11 +189,13 @@ class TestFindingLog:
 
 class TestRecordFindingTool:
     def test_schema_has_required_keys_and_enum(self):
-        assert RECORD_FINDING_TOOL["name"] == "record_finding"
-        assert isinstance(RECORD_FINDING_TOOL["description"], str)
-        assert RECORD_FINDING_TOOL["description"]
+        tool = build_record_finding_tool()
 
-        schema = RECORD_FINDING_TOOL["input_schema"]
+        assert tool["name"] == "record_finding"
+        assert isinstance(tool["description"], str)
+        assert tool["description"]
+
+        schema = tool["input_schema"]
         assert schema["type"] == "object"
         assert set(schema["required"]) == {"claim", "source_command", "exit_code"}
 
@@ -191,6 +204,27 @@ class TestRecordFindingTool:
             "claim", "source_command", "exit_code", "evidence", "confidence",
         }
         assert properties["confidence"]["enum"] == ["low", "medium", "high"]
+
+    def test_returns_a_fresh_dict_each_call(self):
+        """
+        A shared module-level dict would let one caller's in-place edit
+        (e.g. Task 11 stripping keys before the catalogue reaches the model)
+        leak into every other caller - including through nested dicts and
+        lists, which a shallow freeze would not catch. Mutate everything
+        mutable in one copy and confirm a second call is untouched.
+        """
+        first = build_record_finding_tool()
+        first["name"] = "clobbered"
+        first["input_schema"]["properties"]["claim"]["type"] = "clobbered"
+        first["input_schema"]["required"].append("clobbered")
+        first["input_schema"]["properties"]["confidence"]["enum"].append("clobbered")
+
+        second = build_record_finding_tool()
+
+        assert second["name"] == "record_finding"
+        assert second["input_schema"]["properties"]["claim"]["type"] == "string"
+        assert "clobbered" not in second["input_schema"]["required"]
+        assert "clobbered" not in second["input_schema"]["properties"]["confidence"]["enum"]
 
     def test_valid_call_records_and_returns_count(self):
         log = FindingLog()
@@ -242,3 +276,26 @@ class TestRecordFindingTool:
         assert result["recorded"] is False
         assert "error" in result
         assert len(log.findings) == 0
+
+    def test_wrong_typed_field_returns_error_not_raised(self):
+        """
+        Pins that record_finding catches TypeError, not just ValueError -
+        a null field (the most common malformed model output) drives a
+        TypeError through Finding's claim guard.
+        """
+        log = FindingLog()
+        result = record_finding(log, {
+            "claim": None, "source_command": "bsot file hash a", "exit_code": 0,
+        })
+
+        assert result["recorded"] is False
+        assert "error" in result
+        assert len(log.findings) == 0
+
+    def test_non_dict_params_returns_error_not_raised(self):
+        """
+        Non-dict params (e.g. the model sending null instead of an object)
+        currently fail only as a side effect of subscripting raising
+        TypeError - pinned explicitly so that stays true.
+        """
+        assert record_finding(FindingLog(), None)["recorded"] is False
