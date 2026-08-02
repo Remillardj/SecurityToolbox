@@ -66,6 +66,7 @@ def get_lazy_plugins() -> List[Tuple[str, LazyGroup]]:
         ('case', 'bsot.report.cli', 'case', 'Investigation case management'),
         ('report', 'bsot.report.cli', 'report', 'Report generation and export'),
         ('osint', 'bsot.osint.cli', 'osint', 'Open Source Intelligence tools'),
+        ('agent', 'bsot.agent.cli', 'agent', 'Agents that orchestrate BSOT commands'),
     ]
 
     plugins = []
@@ -105,7 +106,8 @@ def cli(ctx, profile, no_cache, defang):
       case        Investigation case management
       report      Report generation and export
       osint       Open Source Intelligence tools
-    
+      agent       Agents that orchestrate BSOT commands
+
     \b
     Example usage:
       bsot phishing analyze suspicious.eml

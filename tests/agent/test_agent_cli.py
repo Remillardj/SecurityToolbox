@@ -1,0 +1,241 @@
+"""Tests for the bsot agent command group.
+
+Offline throughout: `run` never reaches the Anthropic API. The "happy path"
+and "truncated" tests construct an `AgentRun` directly against a stub
+provider (mirroring tests/agent/test_runtime.py) and drive the CLI's
+rendering helpers, or monkeypatch `AgentRun`/`AnthropicProvider` so `run`
+itself never tries to build a real client. No test writes to ~/.bsot/.
+"""
+
+import json
+
+from click.testing import CliRunner
+
+from bsot.agent.cli import agent
+from bsot.agent.runtime import AgentRun, ToolCall
+
+
+class StubProvider:
+    """Returns a scripted sequence of tool calls, then stops."""
+
+    def __init__(self, script):
+        self.script = list(script)
+
+    def next_step(self, messages, tools):
+        if self.script:
+            return self.script.pop(0)
+        return None
+
+
+class ExplodingProvider:
+    """Raises immediately - simulates the run ending in error."""
+
+    def next_step(self, messages, tools):
+        raise RuntimeError("simulated provider failure")
+
+
+class TestList:
+    def test_lists_registered_agents(self):
+        result = CliRunner().invoke(agent, ["list"])
+
+        assert result.exit_code == 0
+        assert "triage" in result.output
+
+    def test_json_output_lists_triage(self):
+        result = CliRunner().invoke(agent, ["list", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        names = [a["name"] for a in payload["agents"]]
+        assert "triage" in names
+
+
+class TestRun:
+    def test_unknown_agent_exits_2(self):
+        result = CliRunner().invoke(agent, ["run", "nope", "--task", "x"])
+
+        assert result.exit_code == 2
+
+    def test_missing_api_key_exits_2(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert result.exit_code == 2
+        assert "ANTHROPIC_API_KEY" in result.output
+
+    def test_clean_run_exits_0(self, monkeypatch):
+        """A run with no findings and nothing gated exits 0."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            self.stop_reason = "completed"
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert result.exit_code == 0
+
+    def test_findings_exit_1(self, monkeypatch):
+        """A run whose findings are non-empty exits 1."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            from bsot.agent.provenance import Finding
+
+            self.stop_reason = "completed"
+            self.findings.add(Finding(
+                claim="binary is unsigned",
+                source_command="bsot malware pe s.exe --json",
+                exit_code=0,
+                confidence="high",
+            ))
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert result.exit_code == 1
+        assert "binary is unsigned" in result.output
+
+    def test_pending_approval_exits_1(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            self.stop_reason = "completed"
+            self.pending_approval.append({
+                "tool": "bsot_ir_cf_block",
+                "command_path": ["ir", "cf", "block"],
+                "params": {"ip": "1.2.3.4"},
+                "executed": False,
+                "reason": "requires human approval",
+            })
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert result.exit_code == 1
+        assert "bsot_ir_cf_block" in result.output
+
+    def test_error_stop_reason_exits_2_even_with_findings(self, monkeypatch):
+        """
+        A crashed run must exit 2, not 1, even if it recorded findings
+        before failing - reporting it as 1 would let a failed run pass for
+        a successful triage.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            from bsot.agent.provenance import Finding
+
+            self.findings.add(Finding(
+                claim="a", source_command="bsot file hash x", exit_code=0,
+            ))
+            self.stop_reason = "error"
+            self.error = {
+                "phase": "provider", "tool": None,
+                "exception_type": "RuntimeError", "message": "simulated failure",
+            }
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert result.exit_code == 2
+        assert "ERROR" in result.output
+
+    def test_truncated_run_is_visibly_marked(self, monkeypatch):
+        """A run that hits max_iterations must be visibly distinct from a
+        completed one in human-readable output."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            self.stop_reason = "max_iterations"
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x"])
+
+        assert "TRUNCAT" in result.output.upper()
+        # A clean truncated run (no findings, nothing gated) still exits 0.
+        assert result.exit_code == 0
+
+    def test_json_output_parses_and_contains_stop_reason_findings_and_pending(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        def fake_execute(self, task):
+            from bsot.agent.provenance import Finding
+
+            self.stop_reason = "completed"
+            self.findings.add(Finding(
+                claim="a", source_command="bsot file hash x", exit_code=0,
+            ))
+            self.pending_approval.append({
+                "tool": "bsot_ir_cf_block",
+                "command_path": ["ir", "cf", "block"],
+                "params": {"ip": "1.2.3.4"},
+                "executed": False,
+                "reason": "requires human approval",
+            })
+
+        monkeypatch.setattr(AgentRun, "execute", fake_execute)
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "x", "--json"])
+
+        payload = json.loads(result.output)
+        assert payload["stop_reason"] == "completed"
+        assert payload["findings"]["count"] == 1
+        assert len(payload["pending_approval"]) == 1
+
+    def test_real_stub_run_reaches_the_cli_end_to_end(self, monkeypatch, tmp_path):
+        """
+        Exercises the CLI without stubbing execute() itself - only the
+        provider is faked, using the same StubProvider pattern as
+        tests/agent/test_runtime.py, so the real AgentRun.execute loop runs.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        target = tmp_path / "a.txt"
+        target.write_text("x")
+
+        from bsot.agent import runtime as runtime_module
+
+        def fake_provider_init(self, api_key=None, model=runtime_module.MODEL,
+                                effort="high", max_tokens=runtime_module.MAX_TOKENS,
+                                client=None):
+            self.api_key = "test-key"
+            self.model = model
+            self.effort = effort
+            self.max_tokens = max_tokens
+            self._client = client
+
+        # A single StubProvider instance, captured once by the lambda below -
+        # NOT reconstructed inside it - so its script is consumed across
+        # calls. A fresh instance per call would reset the script every
+        # time, so next_step would never return None and the loop would run
+        # to max_iterations instead of stopping after the one scripted call.
+        stub = StubProvider([
+            ToolCall(name="bsot_file_hash", params={"files": [str(target)]}),
+        ])
+
+        monkeypatch.setattr(
+            runtime_module.AnthropicProvider, "__init__", fake_provider_init
+        )
+        monkeypatch.setattr(
+            runtime_module.AnthropicProvider,
+            "next_step",
+            lambda self, messages, tools: stub.next_step(messages, tools),
+        )
+
+        result = CliRunner().invoke(agent, ["run", "triage", "--task", "investigate"])
+
+        assert result.exit_code == 0
+        assert "Agent run:" in result.output
+
+
+class TestRegistration:
+    def test_agent_group_is_registered_on_the_root_cli(self):
+        from bsot.cli import get_lazy_plugins
+        assert "agent" in dict(get_lazy_plugins())
