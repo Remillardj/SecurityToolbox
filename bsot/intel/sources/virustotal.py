@@ -7,7 +7,7 @@ import requests
 from typing import Optional
 from dataclasses import dataclass, field
 
-from ...cache import cache
+from ...cache import cache, from_cached
 
 
 @dataclass
@@ -135,7 +135,7 @@ class VirusTotalClient:
         if use_cache:
             cached = cache.get('virustotal', f"ip:{ip}")
             if cached:
-                result = VTResult(**cached)
+                result = from_cached(VTResult, cached)
                 result.ioc = ip
                 result.ioc_type = 'ip'
                 return result
@@ -163,7 +163,7 @@ class VirusTotalClient:
         if use_cache:
             cached = cache.get('virustotal', f"domain:{domain}")
             if cached:
-                result = VTResult(**cached)
+                result = from_cached(VTResult, cached)
                 result.ioc = domain
                 result.ioc_type = 'domain'
                 return result
@@ -188,7 +188,7 @@ class VirusTotalClient:
         if use_cache:
             cached = cache.get('virustotal', f"url:{url_id}")
             if cached:
-                result = VTResult(**cached)
+                result = from_cached(VTResult, cached)
                 result.ioc = url
                 result.ioc_type = 'url'
                 return result
@@ -211,7 +211,7 @@ class VirusTotalClient:
         if use_cache:
             cached = cache.get('virustotal', f"hash:{file_hash}")
             if cached:
-                result = VTResult(**cached)
+                result = from_cached(VTResult, cached)
                 result.ioc = file_hash
                 result.ioc_type = 'hash'
                 return result

@@ -6,7 +6,7 @@ import requests
 from typing import Optional
 from dataclasses import dataclass, field
 
-from ...cache import cache
+from ...cache import cache, from_cached
 
 
 @dataclass
@@ -108,7 +108,7 @@ class OTXClient:
         if use_cache:
             cached = cache.get('otx', f"ip:{ip}")
             if cached:
-                return OTXResult(**cached)
+                return from_cached(OTXResult, cached)
         
         # Get general info
         general = self._get(f"indicators/IPv4/{ip}/general")
@@ -156,7 +156,7 @@ class OTXClient:
         if use_cache:
             cached = cache.get('otx', f"domain:{domain}")
             if cached:
-                return OTXResult(**cached)
+                return from_cached(OTXResult, cached)
         
         # Get general info
         general = self._get(f"indicators/domain/{domain}/general")
@@ -199,7 +199,7 @@ class OTXClient:
         if use_cache:
             cached = cache.get('otx', f"hash:{file_hash}")
             if cached:
-                return OTXResult(**cached)
+                return from_cached(OTXResult, cached)
         
         general = self._get(f"indicators/file/{file_hash}/general")
         if general:
@@ -234,7 +234,7 @@ class OTXClient:
         if use_cache:
             cached = cache.get('otx', f"url:{url_encoded[:32]}")
             if cached:
-                return OTXResult(**cached)
+                return from_cached(OTXResult, cached)
         
         general = self._get(f"indicators/url/{url_encoded}/general")
         if general:

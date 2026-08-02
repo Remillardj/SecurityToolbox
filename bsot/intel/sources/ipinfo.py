@@ -7,7 +7,7 @@ import requests
 from typing import Optional
 from dataclasses import dataclass, field
 
-from ...cache import cache
+from ...cache import cache, from_cached
 
 
 @dataclass
@@ -142,7 +142,7 @@ class IPInfoClient:
         if use_cache:
             cached = cache.get('ipinfo', ip)
             if cached:
-                return IPInfoResult(**cached)
+                return from_cached(IPInfoResult, cached)
         
         try:
             response = requests.get(

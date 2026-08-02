@@ -43,7 +43,7 @@ def enrich(ctx, ioc, sources, json_output, output, no_cache):
         source_list = [s.strip() for s in sources.split(',')]
     
     # Get cache setting from context
-    use_cache = not (no_cache or ctx.obj.get('no_cache', False))
+    use_cache = not (no_cache or (ctx.obj or {}).get('no_cache', False))
     
     enricher = IOCEnricher(use_cache=use_cache)
     
@@ -279,8 +279,10 @@ def bulk(input_file, sources, json_output, csv_output, output, max_concurrent, p
 
 @intel.command()
 @click.argument('domain')
+@click.option('--no-cache', is_flag=True, help='Bypass the local cache for this lookup')
 @click.option('--json', 'json_output', is_flag=True, help='JSON output')
-def whois(domain, json_output):
+@click.pass_context
+def whois(ctx, domain, no_cache, json_output):
     """
     WHOIS lookup for domain registration information.
     
@@ -293,7 +295,8 @@ def whois(domain, json_output):
     from ..utils import print_header, print_subheader, print_finding
     
     client = WHOISClient()
-    result = client.lookup(domain)
+    use_cache = not (no_cache or (ctx.obj or {}).get('no_cache', False))
+    result = client.lookup(domain, use_cache=use_cache)
     
     if json_output:
         click.echo(json_lib.dumps(result.to_dict(), indent=2))
@@ -361,8 +364,10 @@ def whois(domain, json_output):
 
 @intel.command()
 @click.argument('ip')
+@click.option('--no-cache', is_flag=True, help='Bypass the local cache for this lookup')
 @click.option('--json', 'json_output', is_flag=True, help='JSON output')
-def geoip(ip, json_output):
+@click.pass_context
+def geoip(ctx, ip, no_cache, json_output):
     """
     IP geolocation and network context.
     
@@ -376,7 +381,8 @@ def geoip(ip, json_output):
     from ..utils import Colors, print_header, print_subheader
     
     client = IPInfoClient(config.ipinfo_api_key)
-    result = client.lookup(ip)
+    use_cache = not (no_cache or (ctx.obj or {}).get('no_cache', False))
+    result = client.lookup(ip, use_cache=use_cache)
     
     if json_output:
         click.echo(json_lib.dumps(result.to_dict(), indent=2))

@@ -6,7 +6,7 @@ import requests
 from typing import Optional
 from dataclasses import dataclass, field
 
-from ...cache import cache
+from ...cache import cache, from_cached
 
 
 @dataclass
@@ -117,7 +117,7 @@ class GreyNoiseClient:
         if use_cache:
             cached = cache.get('greynoise', ip)
             if cached:
-                return GreyNoiseResult(**cached)
+                return from_cached(GreyNoiseResult, cached)
         
         # Try RIOT first (known good IPs)
         riot_result = self._check_riot(ip)

@@ -231,3 +231,18 @@ def cached(service: str, ttl_hours: int = None):
         return wrapper
     return decorator
 
+
+
+def from_cached(cls, data: Dict[str, Any]):
+    """
+    Rebuild a dataclass from a cached dict, ignoring unknown keys.
+
+    Result classes expose derived values through to_dict() (is_malicious,
+    latitude, score, ...) that are properties, not constructor parameters.
+    Splatting a cached dict straight into the constructor therefore raises
+    TypeError on every cache hit, so the keys are filtered to real fields.
+    """
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(cls)}
+    return cls(**{k: v for k, v in data.items() if k in field_names})

@@ -86,3 +86,32 @@ class TestCacheGroup:
     def test_stats(self, runner):
         result = runner.invoke(cli, ["cache", "stats"])
         assert_no_crash(result)
+
+
+class TestContextObject:
+    """Commands using @click.pass_context must tolerate a missing ctx.obj.
+
+    ctx.obj is populated by the root group's ensure_object(). A command
+    invoked directly on its own group (as tests and library callers do)
+    receives None, and `ctx.obj.get(...)` then raises AttributeError.
+    """
+
+    @pytest.mark.parametrize(
+        "group_name,args",
+        [
+            ("intel", ["geoip", "8.8.8.8"]),
+            ("intel", ["whois", "example.com"]),
+        ],
+    )
+    def test_direct_group_invocation_does_not_crash(self, runner, group_name, args):
+        groups = dict(get_lazy_plugins())
+        group = groups[group_name]._load()
+
+        result = runner.invoke(group, args)
+        assert_no_crash(result)
+
+    def test_no_cache_flag_accepted(self, runner):
+        for args in (["intel", "geoip", "--help"], ["intel", "whois", "--help"]):
+            result = runner.invoke(cli, args)
+            assert_no_crash(result)
+            assert "--no-cache" in result.output

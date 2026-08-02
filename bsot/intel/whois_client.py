@@ -7,7 +7,7 @@ from typing import Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from ..cache import cache
+from ..cache import cache, from_cached
 
 
 @dataclass
@@ -163,7 +163,7 @@ class WHOISClient:
         if use_cache:
             cached = cache.get('whois', domain)
             if cached:
-                return WHOISResult(**cached)
+                return from_cached(WHOISResult, cached)
         
         try:
             import whois

@@ -5,7 +5,7 @@ AbuseIPDB API Client
 import requests
 from dataclasses import dataclass, field
 
-from ...cache import cache
+from ...cache import cache, from_cached
 
 
 @dataclass
@@ -120,7 +120,7 @@ class AbuseIPDBClient:
         if use_cache:
             cached = cache.get('abuseipdb', ip)
             if cached:
-                return AbuseIPDBResult(**cached)
+                return from_cached(AbuseIPDBResult, cached)
         
         try:
             response = requests.get(
