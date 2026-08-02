@@ -32,7 +32,7 @@ build_options = {
 
 setup(
     name="bsot",
-    version="2.0.1",
+    version="2.1.0",
     description="Blue Security Operations Toolkit",
     options={"build_exe": build_options},
     executables=[
