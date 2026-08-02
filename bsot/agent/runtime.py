@@ -37,6 +37,15 @@ Corrections vs. the plan's original skeleton, all load-bearing:
    `KeyboardInterrupt`/`SystemExit`, which are not `Exception` subclasses
    anyway), recorded on `self.error` and in the transcript, and the loop
    stops - no retry, no silent swallow.
+5. Hitting `max_iterations` must be distinguishable from the provider
+   genuinely finishing - otherwise a truncated run (three findings because
+   the cap cut off a four-call investigation) and a completed one look
+   identical to a caller, and an incomplete investigation can be reported
+   as a clean one. `self.stop_reason` records which of the two happened;
+   see `execute()`'s `for ... else` for how the "provider used its very
+   last permitted call to say it was done" case is kept out of
+   "max_iterations" (that would be a false truncation warning on every
+   well-behaved run that uses its full budget).
 """
 
 import json
@@ -150,7 +159,18 @@ class AgentRun:
         # means the run completed (or hasn't run yet) without one. Shape:
         # {"phase": str, "tool": Optional[str], "exception_type": str,
         #  "message": str} - Task 12 reads this to render the failure.
+        # `tool` is None specifically for a provider-phase failure (the
+        # exception happened before any call was obtained, so there is no
+        # tool name yet) - a consumer must not assume "tool" is always a
+        # string.
         self.error: Optional[Dict[str, Any]] = None
+        # How the loop ended - set exactly once, at the very end of
+        # execute(). One of "completed" (provider returned None),
+        # "max_iterations" (the loop exhausted its budget while the
+        # provider still had more to say), or "error" (see self.error).
+        # `None` until execute() has run. Task 12 renders this so a
+        # truncated investigation is never reported as a finished one.
+        self.stop_reason: Optional[str] = None
 
     def execute(self, task: str) -> None:
         """Run the loop until the provider stops or the cap is reached."""
@@ -159,14 +179,25 @@ class AgentRun:
             {"role": "user", "content": task},
         ]
 
+        # The `else` on this `for` only runs if the loop exhausts
+        # `max_iterations` without ever hitting a `break` below - i.e. the
+        # provider was still returning real calls on its last permitted
+        # turn. Both other ways the loop can end (`call is None`, or an
+        # exception) `break` after setting `self.stop_reason` themselves,
+        # so they never reach the `else`. This is what keeps "the provider
+        # used its very last call to say it was done" out of
+        # "max_iterations": that path breaks with "completed" before the
+        # loop ever gets a chance to exhaust naturally.
         for _ in range(self.max_iterations):
             try:
                 call = self.provider.next_step(messages, self.tools)
             except Exception as exc:  # noqa: BLE001 - see module docstring, point 4
                 self._record_failure(phase="provider", tool=None, exc=exc)
+                self.stop_reason = "error"
                 break
 
             if call is None:
+                self.stop_reason = "completed"
                 break
 
             try:
@@ -232,7 +263,14 @@ class AgentRun:
             except Exception as exc:  # noqa: BLE001 - see module docstring, point 4
                 phase = "record_finding" if call.name == "record_finding" else "tool_execution"
                 self._record_failure(phase=phase, tool=call.name, exc=exc)
+                self.stop_reason = "error"
                 break
+        else:
+            # Only reached when the `for` ran out of iterations without a
+            # `break` - the provider was still handing back real calls on
+            # the last permitted turn, so the cap (not the provider) is
+            # what ended the run.
+            self.stop_reason = "max_iterations"
 
     def _record_failure(self, phase: str, tool: Optional[str], exc: Exception) -> None:
         """

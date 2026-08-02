@@ -610,3 +610,78 @@ class TestProviderExceptionSurvival:
         assert run.error["exception_type"] == "ValueError"
         assert len(run.transcript) == 1
         assert run.transcript[0]["executed"] is False
+
+
+class TestStopReason:
+    """
+    `self.stop_reason` distinguishes "the provider decided it was done"
+    from "the loop hit max_iterations while the provider still had more to
+    say" - without it, both look identical to a caller (same transcript
+    shape, same self.error), and a truncated investigation (three findings
+    because the cap cut off a four-call run) can be reported as a
+    completed one.
+    """
+
+    def test_provider_stopping_early_is_completed(self, tmp_path):
+        target = tmp_path / "a.txt"
+        target.write_text("x")
+        provider = StubProvider([
+            ToolCall(name="bsot_file_hash", params={"files": [str(target)]}),
+        ])
+        run = AgentRun(agent="triage", provider=provider, max_iterations=10)
+
+        run.execute("go")
+
+        assert run.stop_reason == "completed"
+        assert run.error is None
+
+    def test_provider_never_stopping_is_max_iterations(self, tmp_path):
+        target = tmp_path / "a.txt"
+        target.write_text("x")
+        call = ToolCall(name="bsot_file_hash", params={"files": [str(target)]})
+        provider = StubProvider([call] * 100)
+        run = AgentRun(agent="triage", provider=provider, max_iterations=3)
+
+        run.execute("go")
+
+        assert run.stop_reason == "max_iterations"
+        assert len(run.transcript) == 3
+
+    def test_stopping_exactly_on_the_last_permitted_call_is_completed_not_truncated(
+        self, tmp_path
+    ):
+        """
+        The boundary that's easy to get backwards: the provider returns
+        real calls for iterations 1..N-1, then None on the Nth (last
+        permitted) call, with max_iterations=N. The full budget was used,
+        but the provider genuinely finished - this must read as
+        "completed", not "max_iterations", or every well-behaved run that
+        happens to use its whole budget would get a false truncation
+        warning.
+        """
+        target = tmp_path / "a.txt"
+        target.write_text("x")
+        call = ToolCall(name="bsot_file_hash", params={"files": [str(target)]})
+        # max_iterations=3: two real calls, then None on the 3rd (last
+        # permitted) request.
+        provider = StubProvider([call, call, None])
+        run = AgentRun(agent="triage", provider=provider, max_iterations=3)
+
+        run.execute("go")
+
+        assert run.stop_reason == "completed"
+        assert len(run.transcript) == 2
+
+    def test_error_path_sets_stop_reason_to_error(self):
+        run = AgentRun(agent="triage", provider=ImmediatelyExplodingProvider())
+
+        run.execute("go")
+
+        assert run.stop_reason == "error"
+        assert run.error is not None
+        assert run.error["phase"] == "provider"
+
+    def test_stop_reason_is_none_before_execute_runs(self):
+        run = AgentRun(agent="triage", provider=StubProvider([]))
+
+        assert run.stop_reason is None
