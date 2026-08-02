@@ -5,6 +5,8 @@ Main CLI entry point with plugin auto-discovery.
 
 import click
 import importlib
+import json as json_lib
+import sys
 from typing import List, Tuple
 
 from . import __version__
@@ -354,7 +356,7 @@ def config_check(live, service, profile, timeout, json_output):
     """
     import os
     from .config import get_config
-    from .utils import Colors, print_header, mask_sensitive
+    from .utils import Colors, print_header
 
     cfg = get_config(profile)
     probes = _SERVICE_PROBES
@@ -463,7 +465,6 @@ def completion(shell):
         eval "$(bsot completion bash)"
     """
     import os
-    import shutil
 
     if not shell:
         # Infer from $SHELL so the bare command still does something useful.

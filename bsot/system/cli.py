@@ -396,7 +396,6 @@ def _vt_check_processes(procs, check_all: bool = False) -> dict:
     per minute, so scanning every process would take many minutes.
     """
     import hashlib
-    from pathlib import Path
     from ..config import config as global_config
     from ..utils import Colors
 
