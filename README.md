@@ -171,6 +171,18 @@ echo 'source ~/.bsot-completion.zsh' >> ~/.zshrc
 |---|---|
 | `domain` | Domain profile: WHOIS, DNS, email security, SSL, subdomains |
 
+### Agents (`bsot agent`)
+| Command | Purpose |
+|---|---|
+| `list` | List available agents |
+| `run` | Run an agent against a task |
+
+Agents orchestrate the commands above; they perform no analysis of their own.
+Every finding cites the command that produced it. Commands that change external
+systems always require human approval, and once a run has read
+adversary-authored content, even some otherwise-safe lookups (`network dns`,
+`intel whois`) require approval too, since their target is attacker-influenced.
+
 ## Examples
 
 ```bash
@@ -202,6 +214,9 @@ bsot file diff etc-baseline.json
 # Passive recon
 bsot network ct-subdomains example.com --resolve
 bsot osint domain example.com --deep
+
+# Have an agent triage an artifact
+bsot agent run triage --task "investigate suspicious.eml"
 ```
 
 ## Exit codes
