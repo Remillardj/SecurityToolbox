@@ -30,6 +30,7 @@ Corrections vs. the plan's original skeleton, all load-bearing:
 """
 
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -236,3 +237,61 @@ class AgentRun:
             })
         self.transcript.append(entry)
         messages.append({"role": "user", "content": json.dumps(result)})
+
+
+MODEL = "claude-opus-5"
+TOOL_SEARCH = {
+    "type": "tool_search_tool_bm25_20251119",
+    "name": "tool_search_tool_bm25",
+}
+
+
+class AnthropicProvider:
+    """
+    Talks to the Claude API.
+
+    Tool schemas are declared deferred and paired with the tool-search tool:
+    carrying 70+ security tools in context on every turn would be expensive and
+    would crowd out the evidence the agent is meant to reason about.
+
+    record_finding is the deliberate exception (design spec, "Do not load 72
+    tools into context"): nearly every run needs it, so build_tools below
+    keeps it loaded rather than deferred.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: str = MODEL):
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is not set. Run 'bsot config check' to see "
+                "which keys are configured."
+            )
+        self.model = model
+
+    def build_tools(self, catalogue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Strip internal keys and mark every command tool deferred.
+
+        record_finding is excluded from deferral, not just excluded from key
+        stripping: `AgentRun.tools` already appends `build_record_finding_tool()`
+        to the catalogue (see `AgentRun.__init__`), so an entry named
+        "record_finding" may already be present in `catalogue` by the time this
+        runs. That entry is skipped here rather than stripped-and-deferred like
+        everything else, and a fresh, canonical copy is appended once at the
+        end instead. This keeps the result correct - present exactly once,
+        never deferred - whether the caller passes the raw command catalogue,
+        `AgentRun.tools` (which already contains it), or something in between.
+        The dict comprehension below builds a new dict per tool rather than
+        mutating in place, so neither this skip-and-append nor the key
+        stripping touches the caller's original list or dicts.
+        """
+        tools: List[Dict[str, Any]] = []
+        for tool in catalogue:
+            if tool.get("name") == "record_finding":
+                continue
+            payload = {k: v for k, v in tool.items() if not k.startswith("_")}
+            payload["defer_loading"] = True
+            tools.append(payload)
+        tools.append(build_record_finding_tool())
+        tools.append(TOOL_SEARCH)
+        return tools

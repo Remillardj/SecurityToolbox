@@ -3,7 +3,10 @@
 The suite must stay fast, offline, and free, so no test here reaches the API.
 """
 
+import copy
 import json
+
+import pytest
 
 from bsot.agent.runtime import AgentRun, ToolCall
 from bsot.agent.safety import UNTRUSTED_TAG_PREFIX
@@ -363,3 +366,120 @@ class TestGatedAndUnknownToolFeedback:
         feedback = provider.seen[-1][-1]
         assert feedback["role"] == "user"
         assert UNTRUSTED_TAG_PREFIX not in feedback["content"]
+
+
+class TestAnthropicProvider:
+    def test_requires_an_api_key(self, monkeypatch):
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+            AnthropicProvider(api_key=None)
+
+    def test_defers_tool_loading(self, monkeypatch):
+        """70+ schemas in context would be wasteful; they load on demand."""
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        payload = provider.build_tools([
+            {"name": "bsot_file_hash", "description": "d",
+             "input_schema": {"type": "object", "properties": {}, "required": []},
+             "_command_path": ["file", "hash"],
+             "_params": {"files": {"kind": "argument", "is_flag": False,
+                                    "multiple": False, "nargs": -1}},
+             "_supports_json": True},
+        ])
+
+        # TIGHTENED from the plan: the bridge also emits `_params` and
+        # `_supports_json` (see bridge.command_to_schema), not just
+        # `_command_path` - asserting on one key would let those two leak to
+        # the model undetected. No key beginning with "_" may survive.
+        assert payload[0]["defer_loading"] is True
+        assert not any(key.startswith("_") for key in payload[0])
+
+    def test_includes_the_tool_search_tool(self, monkeypatch):
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        payload = provider.build_tools([])
+
+        assert any(t.get("type", "").startswith("tool_search") for t in payload)
+
+    def test_record_finding_is_not_deferred(self, monkeypatch):
+        """
+        Design spec (2026-08-02-bsot-agents-design.md, "Do not load 72 tools
+        into context"): record_finding is one of the handful of tools that
+        stay loaded because nearly every run needs them - unlike every CLI
+        command tool, it must NOT get `defer_loading`.
+        """
+        from bsot.agent.provenance import build_record_finding_tool
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        # Mirrors AgentRun.tools, which already appends
+        # build_record_finding_tool() to the catalogue before the provider
+        # ever sees it (see AgentRun.__init__).
+        payload = provider.build_tools([build_record_finding_tool()])
+
+        matches = [t for t in payload if t["name"] == "record_finding"]
+        assert len(matches) == 1
+        assert "defer_loading" not in matches[0]
+
+    def test_record_finding_is_present_even_if_the_caller_omitted_it(self, monkeypatch):
+        """build_tools guarantees record_finding reaches the model either way."""
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        payload = provider.build_tools([])
+
+        matches = [t for t in payload if t["name"] == "record_finding"]
+        assert len(matches) == 1
+
+    def test_record_finding_is_never_duplicated(self, monkeypatch):
+        """
+        AgentRun.tools already contains record_finding (catalogue +
+        [build_record_finding_tool()]) by the time build_tools sees it -
+        build_tools must not also append its own copy on top of that one.
+        """
+        from bsot.agent.provenance import build_record_finding_tool
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        payload = provider.build_tools([
+            {"name": "bsot_file_hash", "description": "d",
+             "input_schema": {"type": "object", "properties": {}, "required": []},
+             "_command_path": ["file", "hash"], "_params": {}, "_supports_json": True},
+            build_record_finding_tool(),
+        ])
+
+        matches = [t for t in payload if t["name"] == "record_finding"]
+        assert len(matches) == 1
+
+    def test_does_not_mutate_the_input_catalogue(self, monkeypatch):
+        """
+        The catalogue is reused across turns, and build_record_finding_tool()
+        returning a fresh copy on every call is by design (see
+        provenance.py) - build_tools must not undo that by mutating the
+        dicts it was handed in place.
+        """
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        provider = AnthropicProvider()
+        tool = {
+            "name": "bsot_file_hash", "description": "d",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+            "_command_path": ["file", "hash"], "_params": {}, "_supports_json": True,
+        }
+        before = copy.deepcopy(tool)
+        catalogue = [tool]
+
+        provider.build_tools(catalogue)
+
+        assert catalogue == [before]
+        assert tool == before
