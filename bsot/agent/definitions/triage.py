@@ -52,9 +52,9 @@ extract-iocs`, and `phishing reputation` instead, which are auto-runnable and
 cover most of what `analyze` would have composed for you anyway. `logs
 ai-analyze` and `report generate` are gated for the same reason: both send
 content off this host to a third-party LLM. `network headers`, `network
-ports`, `network ssl-check`, and `phishing url --expand` are gated too,
-because each one connects to a host you chose from the artifact, and an
-adversary who controls that artifact controls where the connection goes.
+ports`, `network ssl-check`, and `phishing url` are gated too, because each
+one connects to a host you chose from the artifact, and an adversary who
+controls that artifact controls where the connection goes.
 `network dns` and `intel whois` sit in between: they run freely at the start
 of an investigation, but the moment you have read any untrusted output they
 gate as well, because the name you would be querying is forwarded to
