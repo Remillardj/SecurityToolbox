@@ -15,6 +15,25 @@ import click
 # command.params, which is what this module reads.)
 EXCLUDED_PARAMS = {"json_output"}
 
+# Every `--output` option in this codebase is, uniformly, an arbitrary
+# write-target path (verified by reading every command that defines one).
+# Agents consume stdout JSON; a file redirect is a human affordance, not
+# something a model should compose. Stripped only when optional: `file
+# baseline` requires it with no safe default, so dropping it there would
+# leave the model unable to call the command at all. That command stays
+# gated at the tiering layer instead (see bsot/agent/safety.py).
+_ARBITRARY_WRITE_PATH_PARAMS = {"output"}
+
+
+def _is_secret_param(name: str) -> bool:
+    """
+    API keys (openai_key, anthropic_key, virustotal_key, abuseipdb_key, ...)
+    come from the analyst's config or environment, never from model-composed
+    argv — stripped unconditionally, regardless of whether Click marks them
+    required (none currently are).
+    """
+    return name.endswith("_key")
+
 # Click type name -> JSON Schema type
 _TYPE_MAP = {
     "text": "string",
@@ -95,6 +114,10 @@ def command_to_schema(command: click.Command, path: List[str]) -> Dict[str, Any]
             supports_json = True
         if param.name in EXCLUDED_PARAMS:
             continue
+        if param.name in _ARBITRARY_WRITE_PATH_PARAMS and not param.required:
+            continue
+        if _is_secret_param(param.name):
+            continue
         properties[param.name] = _param_schema(param)
         params_meta[param.name] = _param_meta(param)
         if param.required:
@@ -150,5 +173,11 @@ def build_catalogue() -> List[Dict[str, Any]]:
 
     catalogue: List[Dict[str, Any]] = []
     for name, lazy_group in get_lazy_plugins():
+        # A future `agent` plugin group (the runtime's own command surface)
+        # must never be offered back to the agent — that's recursive
+        # self-invocation. Skipped by name rather than relying on that
+        # group never defining agent-shaped tools.
+        if name == "agent":
+            continue
         _walk(lazy_group._load(), [name], catalogue)
     return catalogue

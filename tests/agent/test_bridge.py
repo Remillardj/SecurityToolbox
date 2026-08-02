@@ -161,6 +161,51 @@ class TestParamMetadata:
         assert argument_keys == ["encoding", "value"]
 
 
+class TestArbitraryWritePathStripped:
+    """
+    `--output` is, uniformly across this codebase, an arbitrary write-target
+    path. Agents get stdout JSON; a file redirect is a human affordance and
+    must not be model-composable. Stripped only when optional - `file
+    baseline` requires it and is gated at the tiering layer instead.
+    """
+
+    def test_logs_analyze_has_no_output_property(self, catalogue):
+        tool = next(t for t in catalogue if t["name"] == "bsot_logs_analyze")
+        assert "output" not in tool["input_schema"]["properties"]
+        assert "output" not in tool["_params"]
+
+    def test_file_baseline_still_has_required_output(self, catalogue):
+        """Required with no safe default - dropping it would make the tool uncallable."""
+        tool = next(t for t in catalogue if t["name"] == "bsot_file_baseline")
+        assert "output" in tool["input_schema"]["properties"]
+        assert "output" in tool["_params"]
+        assert "output" in tool["input_schema"]["required"]
+
+
+class TestSecretParamsStripped:
+    """API keys come from the analyst's config/environment, never model-composed argv."""
+
+    def test_phishing_analyze_has_no_api_key_properties(self, catalogue):
+        tool = next(t for t in catalogue if t["name"] == "bsot_phishing_analyze")
+        properties = tool["input_schema"]["properties"]
+        for key_param in ("openai_key", "anthropic_key", "virustotal_key", "abuseipdb_key"):
+            assert key_param not in properties
+            assert key_param not in tool["_params"]
+
+
+class TestAgentGroupExcluded:
+    """
+    The agent must never be offered its own command surface - that's
+    recursive self-invocation. Task 12 registers an `agent` plugin group
+    later; this guards against it leaking into the catalogue.
+    """
+
+    def test_no_tool_name_starts_with_bsot_agent(self, catalogue):
+        names = [tool["name"] for tool in catalogue]
+        offenders = [n for n in names if n.startswith("bsot_agent_")]
+        assert not offenders
+
+
 class TestSupportsJson:
     def test_true_when_command_has_json_flag(self):
         from bsot.cli import get_lazy_plugins
