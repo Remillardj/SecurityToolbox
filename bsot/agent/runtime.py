@@ -27,6 +27,16 @@ Corrections vs. the plan's original skeleton, all load-bearing:
    `_unknown_tool_feedback` build that text; neither goes through
    `frame_untrusted` or taints the run, because both are our own text, not
    command output an adversary-controlled artifact could have influenced.
+4. `execute()` must not let an exception from `provider.next_step` (or,
+   defensively, from the tool-execution / record_finding paths) propagate.
+   In production `next_step` calls the Claude API, so a rate limit, a
+   network blip, a timeout, or an overloaded error is routine on a long
+   run - and if it escapes `execute()`, the caller (Task 12's CLI) never
+   reaches the code that prints findings, so every finding already
+   recorded in the run is lost with it. `Exception` is caught (never
+   `KeyboardInterrupt`/`SystemExit`, which are not `Exception` subclasses
+   anyway), recorded on `self.error` and in the transcript, and the loop
+   stops - no retry, no silent swallow.
 """
 
 import json
@@ -135,6 +145,12 @@ class AgentRun:
         self.failed_findings: List[Dict[str, Any]] = []
         self.transcript: List[Dict[str, Any]] = []
         self.pending_approval: List[Dict[str, Any]] = []
+        # Set once execute() catches an unexpected exception (provider,
+        # tool-execution, or record_finding) and ends the run early. `None`
+        # means the run completed (or hasn't run yet) without one. Shape:
+        # {"phase": str, "tool": Optional[str], "exception_type": str,
+        #  "message": str} - Task 12 reads this to render the failure.
+        self.error: Optional[Dict[str, Any]] = None
 
     def execute(self, task: str) -> None:
         """Run the loop until the provider stops or the cap is reached."""
@@ -144,67 +160,104 @@ class AgentRun:
         ]
 
         for _ in range(self.max_iterations):
-            call = self.provider.next_step(messages, self.tools)
+            try:
+                call = self.provider.next_step(messages, self.tools)
+            except Exception as exc:  # noqa: BLE001 - see module docstring, point 4
+                self._record_failure(phase="provider", tool=None, exc=exc)
+                break
+
             if call is None:
                 break
 
-            if call.name == "record_finding":
-                self._dispatch_record_finding(call, messages)
-                continue
+            try:
+                if call.name == "record_finding":
+                    self._dispatch_record_finding(call, messages)
+                    continue
 
-            tool = _tool_for(call.name, self.catalogue)
-            if tool is None:
-                self.transcript.append({
-                    "tool": call.name, "executed": False,
-                    "error": "unknown tool",
-                })
-                messages.append(
-                    {"role": "user", "content": _unknown_tool_feedback(call)}
+                tool = _tool_for(call.name, self.catalogue)
+                if tool is None:
+                    self.transcript.append({
+                        "tool": call.name, "executed": False,
+                        "error": "unknown tool",
+                    })
+                    messages.append(
+                        {"role": "user", "content": _unknown_tool_feedback(call)}
+                    )
+                    continue
+
+                path = tool["_command_path"]
+
+                if requires_approval(path, self.state.tainted):
+                    entry = {
+                        "tool": call.name,
+                        "command_path": path,
+                        "params": call.params,
+                        "executed": False,
+                        "reason": "requires human approval",
+                    }
+                    self.pending_approval.append(entry)
+                    self.transcript.append(entry)
+                    messages.append({
+                        "role": "user",
+                        "content": _gated_feedback(call, path, tier_for(path)),
+                    })
+                    continue
+
+                # The runtime already holds the catalogue entry for this
+                # tool, so its param metadata and JSON support are passed
+                # straight through rather than making the executor
+                # re-look them up (and, for any path outside the
+                # catalogue, this also bypasses the executor's own
+                # catalogue-refusal guard - correct here because `tool`
+                # above already proves this path came from the catalogue).
+                result = run_command(
+                    path,
+                    call.params,
+                    param_meta=tool["_params"],
+                    supports_json=tool["_supports_json"],
                 )
-                continue
+                framed = frame_untrusted(
+                    _content_for_framing(result), source=result.command
+                )
+                self.state.record_untrusted(result.command)
 
-            path = tool["_command_path"]
-
-            if requires_approval(path, self.state.tainted):
-                entry = {
+                self.transcript.append({
                     "tool": call.name,
-                    "command_path": path,
-                    "params": call.params,
-                    "executed": False,
-                    "reason": "requires human approval",
-                }
-                self.pending_approval.append(entry)
-                self.transcript.append(entry)
-                messages.append({
-                    "role": "user",
-                    "content": _gated_feedback(call, path, tier_for(path)),
+                    "command": result.command,
+                    "exit_code": result.exit_code,
+                    "executed": True,
+                    "framed_output": framed,
                 })
-                continue
+                messages.append({"role": "user", "content": framed})
+            except Exception as exc:  # noqa: BLE001 - see module docstring, point 4
+                phase = "record_finding" if call.name == "record_finding" else "tool_execution"
+                self._record_failure(phase=phase, tool=call.name, exc=exc)
+                break
 
-            # The runtime already holds the catalogue entry for this tool,
-            # so its param metadata and JSON support are passed straight
-            # through rather than making the executor re-look them up (and,
-            # for any path outside the catalogue, this also bypasses the
-            # executor's own catalogue-refusal guard - correct here because
-            # `tool` above already proves this path came from the
-            # catalogue).
-            result = run_command(
-                path,
-                call.params,
-                param_meta=tool["_params"],
-                supports_json=tool["_supports_json"],
-            )
-            framed = frame_untrusted(_content_for_framing(result), source=result.command)
-            self.state.record_untrusted(result.command)
+    def _record_failure(self, phase: str, tool: Optional[str], exc: Exception) -> None:
+        """
+        Record an unexpected exception and let the run end cleanly instead
+        of propagating it out of `execute()`.
 
-            self.transcript.append({
-                "tool": call.name,
-                "command": result.command,
-                "exit_code": result.exit_code,
-                "executed": True,
-                "framed_output": framed,
-            })
-            messages.append({"role": "user", "content": framed})
+        Findings, transcript entries, and the pending-approval queue
+        recorded before the failure are left exactly as they were - the
+        whole point is that a routine provider hiccup (rate limit, network
+        blip, timeout, overloaded error) partway through a long run must
+        not erase everything the run already found. No retry is attempted
+        here; that policy is out of scope for the runtime loop.
+        """
+        self.error = {
+            "phase": phase,
+            "tool": tool,
+            "exception_type": type(exc).__name__,
+            "message": str(exc),
+        }
+        self.transcript.append({
+            "tool": tool,
+            "executed": False,
+            "error": f"{phase} failed: {type(exc).__name__}: {exc}",
+            "phase": phase,
+        })
 
     def _dispatch_record_finding(
         self, call: ToolCall, messages: List[Dict[str, Any]]

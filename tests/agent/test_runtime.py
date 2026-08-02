@@ -483,3 +483,130 @@ class TestAnthropicProvider:
 
         assert catalogue == [before]
         assert tool == before
+
+
+class ImmediatelyExplodingProvider:
+    """Raises on every call - simulates an API failure before any call is made."""
+
+    def next_step(self, messages, tools):
+        raise RuntimeError("provider exploded")
+
+
+class ExplodesOnSecondCallProvider:
+    """
+    Returns one scripted call, then raises - simulates a routine mid-run API
+    failure (rate limit, network blip, timeout, overloaded error) on the
+    turn AFTER the model has already made real progress.
+    """
+
+    def __init__(self, first_call):
+        self.first_call = first_call
+        self.calls = 0
+
+    def next_step(self, messages, tools):
+        self.calls += 1
+        if self.calls == 1:
+            return self.first_call
+        raise RuntimeError("provider exploded on turn 2 (e.g. a 429)")
+
+
+class TestProviderExceptionSurvival:
+    """
+    In production, `next_step` calls the Claude API - a rate limit, a
+    network blip, a timeout, or an overloaded error are all routine on a
+    long run. Before this fix, any of those propagated straight out of
+    execute(), so the caller (Task 12's CLI) never reached the code that
+    prints findings: a run that had already recorded twenty findings and
+    then hit a 429 on turn twenty-one reported nothing at all.
+    """
+
+    def test_provider_exception_on_first_call_ends_the_run_cleanly(self):
+        run = AgentRun(agent="triage", provider=ImmediatelyExplodingProvider())
+
+        run.execute("go")  # must not raise
+
+        assert run.error is not None
+        assert run.error["phase"] == "provider"
+        assert run.error["tool"] is None
+        assert run.error["exception_type"] == "RuntimeError"
+        assert "provider exploded" in run.error["message"]
+
+        assert len(run.transcript) == 1
+        assert run.transcript[0]["executed"] is False
+        assert "RuntimeError" in run.transcript[0]["error"]
+
+    def test_findings_and_transcript_survive_a_later_provider_exception(self):
+        """
+        The scenario the fix exists for: a run that already recorded a real
+        finding must not lose it just because a later call to the provider
+        blows up. This is the test that proves the loss scenario is closed.
+        """
+        first_call = ToolCall(name="record_finding", params={
+            "claim": "binary is unsigned",
+            "source_command": "bsot malware pe sample.exe --json",
+            "exit_code": 0,
+        })
+        provider = ExplodesOnSecondCallProvider(first_call)
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")  # must not raise
+
+        # The first call's finding and transcript entry survive intact.
+        assert len(run.findings) == 1
+        assert run.findings.findings[0].claim == "binary is unsigned"
+        assert len(run.transcript) == 2
+        assert run.transcript[0]["recorded"] is True
+
+        # The second call's failure is visible, not silently swallowed.
+        assert run.transcript[1]["executed"] is False
+        assert "RuntimeError" in run.transcript[1]["error"]
+        assert run.error is not None
+        assert run.error["phase"] == "provider"
+        assert run.error["exception_type"] == "RuntimeError"
+
+    def test_does_not_catch_keyboard_interrupt(self):
+        class InterruptingProvider:
+            def next_step(self, messages, tools):
+                raise KeyboardInterrupt()
+
+        run = AgentRun(agent="triage", provider=InterruptingProvider())
+
+        with pytest.raises(KeyboardInterrupt):
+            run.execute("go")
+
+        assert run.error is None
+
+    def test_does_not_catch_system_exit(self):
+        class ExitingProvider:
+            def next_step(self, messages, tools):
+                raise SystemExit(1)
+
+        run = AgentRun(agent="triage", provider=ExitingProvider())
+
+        with pytest.raises(SystemExit):
+            run.execute("go")
+
+        assert run.error is None
+
+    def test_tool_execution_exception_is_caught_and_recorded(self, monkeypatch):
+        """Defensive coverage: the tool-execution path, not just the provider."""
+        import bsot.agent.runtime as runtime_module
+
+        def _boom(*args, **kwargs):
+            raise ValueError("run_command exploded")
+
+        monkeypatch.setattr(runtime_module, "run_command", _boom)
+
+        provider = StubProvider([
+            ToolCall(name="bsot_file_hash", params={"files": []}),
+        ])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")  # must not raise
+
+        assert run.error is not None
+        assert run.error["phase"] == "tool_execution"
+        assert run.error["tool"] == "bsot_file_hash"
+        assert run.error["exception_type"] == "ValueError"
+        assert len(run.transcript) == 1
+        assert run.transcript[0]["executed"] is False
