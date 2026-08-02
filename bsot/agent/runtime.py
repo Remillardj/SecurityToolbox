@@ -7,7 +7,7 @@ replacing this file swaps local execution for hosted without touching the
 rest (Task 11 appends an AnthropicProvider to this same file rather than
 introducing a second provider-aware module).
 
-Two corrections vs. the plan's original skeleton, both load-bearing:
+Corrections vs. the plan's original skeleton, all load-bearing:
 
 1. `record_finding` is a hand-written tool (bsot.agent.provenance), not a
    CLI command - `build_catalogue()` only walks the Click tree, so this tool
@@ -19,6 +19,14 @@ Two corrections vs. the plan's original skeleton, both load-bearing:
    missing binary, a signal-killed child - while the only diagnostic lives
    in `CommandResult.error`. `_content_for_framing` falls back to it rather
    than framing an empty block that tells the model nothing went wrong.
+3. A gated or unknown-tool call must still produce a message back to the
+   model, same as every other tool call - otherwise the model either
+   retries the same gated call until `max_iterations` burns out (exactly
+   the loop Task 9's triage prompt tells it not to do), or gets no chance
+   to correct a typoed tool name. `_gated_feedback` and
+   `_unknown_tool_feedback` build that text; neither goes through
+   `frame_untrusted` or taints the run, because both are our own text, not
+   command output an adversary-controlled artifact could have influenced.
 """
 
 import json
@@ -30,7 +38,7 @@ from .bridge import build_catalogue
 from .definitions import get_definition
 from .executor import CommandResult, run_command
 from .provenance import FindingLog, build_record_finding_tool, record_finding
-from .safety import RunState, frame_untrusted, requires_approval
+from .safety import RunState, Tier, frame_untrusted, requires_approval, tier_for
 
 
 @dataclass
@@ -69,6 +77,37 @@ def _content_for_framing(result: CommandResult) -> str:
     return (
         f"(command exited {result.exit_code} with no stdout, stderr, "
         "or diagnostic message)"
+    )
+
+
+def _gated_feedback(call: "ToolCall", path: List[str], tier: Tier) -> str:
+    """
+    Text fed back to the model when a call is gated for human approval.
+
+    Deliberately echoes Task 9's triage prompt ("do not retry it and do not
+    hunt for a workaround - note what you wanted to run and why as part of
+    your findings, and keep going") so the runtime's behavior and the
+    prompt's instructions agree, rather than the model having read guidance
+    that the loop never actually followed through on.
+    """
+    command_name = "bsot " + " ".join(path)
+    return (
+        f"Tool call '{call.name}' ({command_name}) was NOT executed. It is "
+        f"tier {tier.value}, which requires a human to approve it before it "
+        "can run; it has been queued for approval. Do not retry this call "
+        "and do not hunt for a workaround. Note what you wanted to run and "
+        "why as part of your findings, and keep going with what is still "
+        "available to you."
+    )
+
+
+def _unknown_tool_feedback(call: "ToolCall") -> str:
+    """Text fed back to the model when it calls a tool name that doesn't exist."""
+    return (
+        f"Tool call '{call.name}' was NOT executed: this is not a "
+        "recognized tool name (it is not in the tool catalogue and is not "
+        "record_finding). Check the spelling against the tools you were "
+        "given and, if you meant a different tool, call that one instead."
     )
 
 
@@ -118,6 +157,9 @@ class AgentRun:
                     "tool": call.name, "executed": False,
                     "error": "unknown tool",
                 })
+                messages.append(
+                    {"role": "user", "content": _unknown_tool_feedback(call)}
+                )
                 continue
 
             path = tool["_command_path"]
@@ -132,6 +174,10 @@ class AgentRun:
                 }
                 self.pending_approval.append(entry)
                 self.transcript.append(entry)
+                messages.append({
+                    "role": "user",
+                    "content": _gated_feedback(call, path, tier_for(path)),
+                })
                 continue
 
             # The runtime already holds the catalogue entry for this tool,

@@ -272,3 +272,94 @@ class TestTaintChangesBehavior:
         assert run.transcript[1]["executed"] is False
         assert len(run.pending_approval) == 1
         assert run.pending_approval[0]["tool"] == "bsot_case_note"
+
+
+class SnapshotProvider:
+    """
+    Like StubProvider, but records a length-accurate snapshot of `messages`
+    at each call.
+
+    StubProvider.next_step stores a live reference to the same `messages`
+    list `AgentRun.execute` mutates in place - by the end of a run, every
+    entry already appended to `self.seen` points at the SAME, fully-grown
+    list object, so comparing `len(seen[0])` to `len(seen[1])` after the run
+    finishes would trivially compare a list to itself. Copying at call time
+    (`list(messages)`) freezes each turn's length instead.
+    """
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.seen = []
+
+    def next_step(self, messages, tools):
+        self.seen.append(list(messages))
+        if self.script:
+            return self.script.pop(0)
+        return None
+
+
+class TestGatedAndUnknownToolFeedback:
+    """
+    Regression coverage: a gated or unknown-tool call must still produce a
+    message back to the model, same as every other tool call. Without this,
+    the model either retries the same gated call until max_iterations burns
+    out - exactly the loop Task 9's triage prompt tells it not to do - or
+    gets no chance to correct a typoed tool name.
+    """
+
+    def test_gated_call_grows_the_message_list_the_provider_sees(self):
+        call = ToolCall(name="bsot_ir_cf_block", params={"ip": "1.2.3.4"})
+        # Scripted twice so next_step is invoked a second time, letting us
+        # compare the messages list the provider saw on turn 1 vs. turn 2.
+        provider = SnapshotProvider([call, call])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert len(provider.seen) >= 2
+        assert len(provider.seen[1]) > len(provider.seen[0])
+        feedback = provider.seen[1][-1]
+        assert feedback["role"] == "user"
+        assert "approval" in feedback["content"].lower()
+
+    def test_unknown_tool_call_grows_the_message_list_the_provider_sees(self):
+        call = ToolCall(name="bsot_not_a_real_tool", params={})
+        provider = SnapshotProvider([call, call])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert len(provider.seen) >= 2
+        assert len(provider.seen[1]) > len(provider.seen[0])
+        feedback = provider.seen[1][-1]
+        assert feedback["role"] == "user"
+        assert "not a recognized tool" in feedback["content"].lower()
+
+    def test_gated_call_still_appears_in_pending_approval_as_not_executed(self):
+        """Proves the feedback message didn't alter gating behavior."""
+        call = ToolCall(name="bsot_ir_cf_block", params={"ip": "1.2.3.4"})
+        provider = StubProvider([call])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        assert len(run.pending_approval) == 1
+        assert run.pending_approval[0]["executed"] is False
+        assert run.transcript[0]["executed"] is False
+
+    def test_gated_feedback_does_not_taint_or_get_framed_as_untrusted(self):
+        call = ToolCall(name="bsot_ir_cf_block", params={"ip": "1.2.3.4"})
+        provider = StubProvider([call])
+        run = AgentRun(agent="triage", provider=provider)
+
+        run.execute("go")
+
+        # Only the gated call ran (nothing else in the script), so if
+        # taint tracking correctly ignored the feedback message, the run
+        # is still clean.
+        assert run.state.tainted is False
+        assert run.state.untrusted_sources == []
+
+        feedback = provider.seen[-1][-1]
+        assert feedback["role"] == "user"
+        assert UNTRUSTED_TAG_PREFIX not in feedback["content"]
