@@ -25,14 +25,37 @@ EXCLUDED_PARAMS = {"json_output"}
 _ARBITRARY_WRITE_PATH_PARAMS = {"output"}
 
 
-def _is_secret_param(name: str) -> bool:
+# A credential-shaped name (ends in _key/password/token/secret) is usually
+# a secret the analyst configured, never something a model should compose —
+# except these two, where the same-shaped name is the artifact under
+# analysis rather than a credential: `auth jwt-decode <token>` decodes the
+# JWT string itself, and `auth password-analyze <password>` scores the
+# password itself. Keyed by (command path, param name) rather than name
+# alone so this stays a narrow, auditable exception.
+_SECRET_LOOKALIKE_EXEMPTIONS = {
+    (("auth", "jwt-decode"), "token"),
+    (("auth", "password-analyze"), "password"),
+}
+
+
+def _is_secret_param(path: List[str], name: str) -> bool:
     """
-    API keys (openai_key, anthropic_key, virustotal_key, abuseipdb_key, ...)
-    come from the analyst's config or environment, never from model-composed
-    argv — stripped unconditionally, regardless of whether Click marks them
-    required (none currently are).
+    Credentials come from the analyst's config or environment, never from
+    model-composed argv — stripped unconditionally, regardless of whether
+    Click marks them required (none currently are; if one ever were, that
+    would make the command uncallable via the agent, which is the right
+    failure mode for a command whose only interface is a secret).
+
+    Matches API keys (openai_key, anthropic_key, virustotal_key,
+    abuseipdb_key, ...) via the `_key` suffix, plus anything named exactly
+    or ending in `password`, `token`, or `secret` (e.g. `report package
+    --password`, which encrypts the output archive) — except the two
+    analysis-subject params in _SECRET_LOOKALIKE_EXEMPTIONS.
     """
-    return name.endswith("_key")
+    if (tuple(path), name) in _SECRET_LOOKALIKE_EXEMPTIONS:
+        return False
+    return name.endswith(("_key", "password", "token", "secret"))
+
 
 # Click type name -> JSON Schema type
 _TYPE_MAP = {
@@ -116,7 +139,7 @@ def command_to_schema(command: click.Command, path: List[str]) -> Dict[str, Any]
             continue
         if param.name in _ARBITRARY_WRITE_PATH_PARAMS and not param.required:
             continue
-        if _is_secret_param(param.name):
+        if _is_secret_param(path, param.name):
             continue
         properties[param.name] = _param_schema(param)
         params_meta[param.name] = _param_meta(param)

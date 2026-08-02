@@ -183,7 +183,13 @@ class TestArbitraryWritePathStripped:
 
 
 class TestSecretParamsStripped:
-    """API keys come from the analyst's config/environment, never model-composed argv."""
+    """
+    Credentials come from the analyst's config/environment, never
+    model-composed argv. The heuristic matches on name (`_key` suffix, or
+    named exactly/ending in `password`/`token`/`secret`), with two narrow
+    exceptions for params that are credential-shaped by name but are
+    actually the artifact under analysis.
+    """
 
     def test_phishing_analyze_has_no_api_key_properties(self, catalogue):
         tool = next(t for t in catalogue if t["name"] == "bsot_phishing_analyze")
@@ -191,6 +197,43 @@ class TestSecretParamsStripped:
         for key_param in ("openai_key", "anthropic_key", "virustotal_key", "abuseipdb_key"):
             assert key_param not in properties
             assert key_param not in tool["_params"]
+
+    def test_report_package_loses_password(self, catalogue):
+        """--password encrypts the output archive - a credential, not an analysis subject."""
+        tool = next(t for t in catalogue if t["name"] == "bsot_report_package")
+        assert "password" not in tool["input_schema"]["properties"]
+        assert "password" not in tool["_params"]
+
+    def test_auth_jwt_decode_keeps_token(self, catalogue):
+        """`token` here is the JWT being decoded, not a credential supplied to BSOT."""
+        tool = next(t for t in catalogue if t["name"] == "bsot_auth_jwt_decode")
+        assert "token" in tool["input_schema"]["properties"]
+        assert "token" in tool["_params"]
+
+    def test_auth_password_analyze_keeps_password(self, catalogue):
+        """`password` here is the password being scored, not a credential supplied to BSOT."""
+        tool = next(t for t in catalogue if t["name"] == "bsot_auth_password_analyze")
+        assert "password" in tool["input_schema"]["properties"]
+        assert "password" in tool["_params"]
+
+
+class TestNoRequiredParamIsEverStripped:
+    """
+    Stripping is only safe when the param is optional (or explicitly
+    exempted). If any stripping rule ever removed a *required* param, the
+    tool would be uncallable - `required` would name a property that
+    doesn't exist. Checked across the whole catalogue, not just the
+    commands the other tests target directly.
+    """
+
+    def test_every_required_param_has_a_property(self, catalogue):
+        offenders = [
+            (tool["name"], name)
+            for tool in catalogue
+            for name in tool["input_schema"]["required"]
+            if name not in tool["input_schema"]["properties"]
+        ]
+        assert not offenders, f"required params missing from properties: {offenders}"
 
 
 class TestAgentGroupExcluded:

@@ -1,11 +1,14 @@
 """Tests for tool tiering and the approval gate."""
 
+import pytest
+
 from bsot.agent.bridge import build_catalogue
 from bsot.agent.safety import (
     Tier,
     _CASE_WRITE,
     _EXTERNAL_MUTATION,
     _READ_ONLY,
+    _TAINT_GATED,
     requires_approval,
     tier_for,
 )
@@ -37,26 +40,27 @@ class TestTiering:
         assert tier_for(["malware", "submit"]) is Tier.EXTERNAL_MUTATION
 
 
+_ALL_TIER_SETS = (_READ_ONLY, _CASE_WRITE, _TAINT_GATED, _EXTERNAL_MUTATION)
+
+
 class TestCompleteness:
     """
     The whole point of per-command classification is that nothing rides in
     on a group whitelist by accident. This is the mechanism that makes that
     true: every tool the bridge currently generates must be explicitly
-    placed in exactly one of the three tier sets. A new CLI command breaks
+    placed in exactly one of the four tier sets. A new CLI command breaks
     this test until a human classifies it deliberately - that's the
     guarantee the safety.py module docstring promises, made real.
     """
 
     def test_every_catalogue_command_is_classified_exactly_once(self):
         catalogue = build_catalogue()
-        all_classified = _READ_ONLY | _CASE_WRITE | _EXTERNAL_MUTATION
+        all_classified = set().union(*_ALL_TIER_SETS)
 
         missing = []
         for tool in catalogue:
             key = tuple(tool["_command_path"])
-            membership = sum(
-                key in bucket for bucket in (_READ_ONLY, _CASE_WRITE, _EXTERNAL_MUTATION)
-            )
+            membership = sum(key in bucket for bucket in _ALL_TIER_SETS)
             if membership != 1:
                 missing.append((key, membership))
 
@@ -69,14 +73,14 @@ class TestCompleteness:
     def test_no_stale_entries_for_commands_that_no_longer_exist(self):
         """The reverse check: every classified path must still be a real command."""
         catalogue_paths = {tuple(tool["_command_path"]) for tool in build_catalogue()}
-        all_classified = _READ_ONLY | _CASE_WRITE | _EXTERNAL_MUTATION
+        all_classified = set().union(*_ALL_TIER_SETS)
 
         stale = all_classified - catalogue_paths
         assert not stale, f"classified paths with no matching command: {stale}"
 
 
 class TestRequiresApproval:
-    """Truth table: 3 tiers x tainted/untainted."""
+    """Truth table: 4 tiers x tainted/untainted."""
 
     def test_read_only_untainted_no_approval(self):
         assert requires_approval(["file", "hash"], tainted=False) is False
@@ -92,12 +96,48 @@ class TestRequiresApproval:
         """A tainted run may not write even to the case without a human."""
         assert requires_approval(["case", "add"], tainted=True) is True
 
+    def test_taint_gated_untainted_no_approval(self):
+        """Auto-run on a clean run: no adversary text has entered the run."""
+        assert requires_approval(["network", "dns"], tainted=False) is False
+
+    def test_taint_gated_tainted_requires_approval(self):
+        """A tainted run may not pick this tool's DNS-query target without a human."""
+        assert requires_approval(["network", "dns"], tainted=True) is True
+
     def test_external_mutation_untainted_requires_approval(self):
         """External mutations always need a human, tainted or not."""
         assert requires_approval(["malware", "submit"], tainted=False) is True
 
     def test_external_mutation_tainted_requires_approval(self):
         assert requires_approval(["malware", "submit"], tainted=True) is True
+
+
+class TestTaintGated:
+    """
+    `network dns` and `intel whois` route a model-chosen label to whatever
+    infrastructure is authoritative for it, rather than to a fixed host -
+    the exfiltration channel N2 closed. Fixed-host lookups (the label is a
+    query parameter to VT/crt.sh/etc., never routed to attacker-chosen
+    infrastructure) must stay auto-runnable even when tainted.
+    """
+
+    def test_network_dns_and_intel_whois_are_taint_gated(self):
+        assert tier_for(["network", "dns"]) is Tier.TAINT_GATED
+        assert tier_for(["intel", "whois"]) is Tier.TAINT_GATED
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ["intel", "enrich"],
+            ["intel", "geoip"],
+            ["intel", "cve"],
+            ["network", "ct-subdomains"],
+            ["phishing", "reputation"],
+        ],
+    )
+    def test_fixed_host_lookups_stay_read_only_even_when_tainted(self, path):
+        assert tier_for(path) is Tier.READ_ONLY
+        assert requires_approval(path, tainted=True) is False
 
 
 class TestReclassifiedCommands:
@@ -171,3 +211,24 @@ class TestHazardsFoundInThisReview:
         `output`, not `output_dir`).
         """
         assert tier_for(["ir", "collect"]) is Tier.EXTERNAL_MUTATION
+
+
+class TestTierPinning:
+    """
+    TestCompleteness proves every command is a member of exactly one set;
+    it does NOT prove that set maps to the tier its own name claims - e.g.
+    moving `report package` from `_CASE_WRITE` into `_READ_ONLY` would
+    leave every completeness test green. Pin membership -> tier directly
+    for CASE_WRITE and TAINT_GATED. EXTERNAL_MUTATION is already fully
+    pinned member-by-member above (TestTiering, TestReclassifiedCommands,
+    TestHazardsFoundInThisReview together cover all 16 entries) - keep it
+    that way rather than adding a parametrized duplicate here.
+    """
+
+    @pytest.mark.parametrize("path", sorted(_CASE_WRITE))
+    def test_case_write_members_tier_as_case_write(self, path):
+        assert tier_for(list(path)) is Tier.CASE_WRITE
+
+    @pytest.mark.parametrize("path", sorted(_TAINT_GATED))
+    def test_taint_gated_members_tier_as_taint_gated(self, path):
+        assert tier_for(list(path)) is Tier.TAINT_GATED

@@ -24,30 +24,49 @@ class Tier(Enum):
     """
     What a tool is allowed to do without a human.
 
-    EXTERNAL_MUTATION is the "always needs a human" tier. Despite the name,
-    it is not only state changes outside this host (a Cloudflare rule, a
-    malware submission) - it also covers calls that let a tainted run point
-    this host's own network egress or filesystem writes at a target the
-    model chose (a port scan, an HTTP fetch of an attacker-supplied URL, an
-    arbitrary write path, a silent call to a third-party LLM). Both shapes
-    boil down to "a tainted model made this host do something to a target
-    of its choosing," and both get the same gate.
+    EXTERNAL_MUTATION is the "always needs a human" tier, tainted or not.
+    Despite the name, it is not only state changes outside this host (a
+    Cloudflare rule, a malware submission) - it also covers calls that let a
+    tainted run point this host's own network egress or filesystem writes at
+    a target the model chose (a port scan, an HTTP fetch of an
+    attacker-supplied URL, an arbitrary write path, a silent call to a
+    third-party LLM). Both shapes boil down to "a tainted model made this
+    host do something to a target of its choosing," and both get the same
+    gate.
+
+    TAINT_GATED is a weaker version of that same shape: safe to auto-run on
+    a clean run, but a tainted run may not direct it, because the model's
+    choice of *target* (not just its interpretation of a result) is now
+    downstream of adversary-controlled text. `network dns` is the
+    motivating case - the label queried is forwarded verbatim to whatever
+    nameserver is authoritative for it, and a tainted run could be steered
+    into treating that as an exfiltration channel (e.g. a base32-encoded
+    secret as a subdomain of an attacker-controlled zone). See
+    `requires_approval`: this tier needs no special-casing there, because
+    "auto-run clean, gate tainted" is exactly what its existing tainted-vs-
+    tier check already produces.
     """
 
     READ_ONLY = "read_only"
     CASE_WRITE = "case_write"
+    TAINT_GATED = "taint_gated"
     EXTERNAL_MUTATION = "external_mutation"
 
 
 CommandPath = Tuple[str, ...]
 
 # ---------------------------------------------------------------------------
-# READ_ONLY: local reads, and per-IOC/per-hash lookups against a fixed,
+# READ_ONLY: local reads, and per-IOC/per-hash lookups against a *fixed*,
 # known third-party service (VirusTotal, AbuseIPDB, GreyNoise, OTX, ipinfo,
-# WHOIS, NVD/cve.org/GitHub Advisories, MITRE ATT&CK, crt.sh, Have I Been
-# Pwned, Cloudflare's own rule list). The indicator is a query parameter
-# sent to a fixed host in these - never the connection target itself - which
-# is what keeps them out of EXTERNAL_MUTATION.
+# NVD/cve.org/GitHub Advisories, MITRE ATT&CK, crt.sh, Have I Been Pwned,
+# Cloudflare's own rule list). The indicator is a query *parameter* sent to
+# a fixed host in these - e.g. `intel enrich evil.com` asks VirusTotal about
+# "evil.com", it never makes VirusTotal itself resolve or connect to
+# "evil.com". That's the boundary that keeps a lookup in this tier: the
+# label never becomes part of a request that some attacker-chosen system
+# receives and can respond to. Lookups where the label *is* effectively
+# routed to attacker-chosen infrastructure (DNS resolution, WHOIS referral)
+# are in TAINT_GATED instead, below - not here.
 # ---------------------------------------------------------------------------
 _READ_ONLY: frozenset = frozenset({
     # phishing: local parsing plus fixed-host reputation lookups. (`analyze`
@@ -56,7 +75,10 @@ _READ_ONLY: frozenset = frozenset({
     ("phishing", "headers"),
     ("phishing", "reputation"),
 
-    # intel: all fixed-host enrichment, or pure local string ops.
+    # intel: fixed-host enrichment (the queried service never itself
+    # contacts the indicator), or pure local string ops. (`whois` is NOT
+    # here - see TAINT_GATED: a referral query reaches the registrar named
+    # in the label.)
     ("intel", "bulk"),
     ("intel", "cve"),
     ("intel", "defang"),
@@ -64,7 +86,6 @@ _READ_ONLY: frozenset = frozenset({
     ("intel", "geoip"),
     ("intel", "mitre"),
     ("intel", "refang"),
-    ("intel", "whois"),
 
     # file: local filesystem/forensics reads only. (`baseline` requires an
     # arbitrary write path and is gated - see EXTERNAL_MUTATION.)
@@ -78,14 +99,14 @@ _READ_ONLY: frozenset = frozenset({
     ("file", "strings"),
     ("file", "suid-finder"),
 
-    # network: DNS lookups go through the configured resolver (indirect,
-    # like whois) rather than connecting to the target directly. `ct-
-    # subdomains` queries crt.sh (a fixed host); its --resolve flag only
-    # does further DNS resolution, not a connection to the target.
-    # (`headers`, `ports`, `ssl-check` are NOT here - direct connections to
-    # an attacker-supplied target. See EXTERNAL_MUTATION.)
+    # network: `ct-subdomains` queries crt.sh (a fixed host) with the domain
+    # as a parameter; its --resolve flag does further DNS resolution per
+    # subdomain, same caveat as `network dns` below but scoped to names
+    # crt.sh already returned, not a model-chosen label - left here.
+    # (`dns` is NOT here - see TAINT_GATED. `headers`, `ports`, `ssl-check`
+    # are NOT here either - direct connections to an attacker-supplied
+    # target. See EXTERNAL_MUTATION.)
     ("network", "ct-subdomains"),
-    ("network", "dns"),
 
     # logs: local parsing/analysis only (the LLM call lives in ai-analyze).
     ("logs", "analyze"),
@@ -112,11 +133,18 @@ _READ_ONLY: frozenset = frozenset({
     ("system", "persistence"),
     ("system", "processes"),
 
-    # ir: hash-tree only reads files and hashes them - its `--output` is an
-    # optional write path stripped by the bridge (bridge.py), so the write
-    # target the model can influence is gone. cf list / cf test only call
-    # read endpoints on the Cloudflare API. (`collect` is NOT here - see
-    # EXTERNAL_MUTATION.)
+    # ir: hash-tree writes a manifest file ONLY when --json is absent
+    # (bsot/ir/cli.py:96-98 returns right after printing JSON to stdout,
+    # before the `open(output_path, 'w')` a few lines later ever runs). The
+    # executor always passes --json (see bridge.py's EXCLUDED_PARAMS
+    # comment), so under the agent that write branch is never reached at
+    # all - this tier depends on that contract holding. Stripping the
+    # optional --output (bridge.py) is a secondary defense, and on its own
+    # would NOT be enough: without --json, the write still happens, just
+    # pinned to the fixed relative path `./evidence_manifest.json`
+    # (`output_path = output or 'evidence_manifest.json'`) rather than a
+    # model-chosen one. cf list / cf test only call read endpoints on the
+    # Cloudflare API. (`collect` is NOT here - see EXTERNAL_MUTATION.)
     ("ir", "cf", "list"),
     ("ir", "cf", "test"),
     ("ir", "hash-tree"),
@@ -141,6 +169,31 @@ _READ_ONLY: frozenset = frozenset({
     ("report", "ioc"),
     ("report", "template"),
     ("report", "timeline"),
+})
+
+# ---------------------------------------------------------------------------
+# TAINT_GATED: safe to auto-run on a clean run; a tainted run needs a human.
+# Both entries send a model-chosen label to infrastructure that the label
+# itself names, rather than to a fixed, known host - so a tainted run could
+# turn the label into an exfiltration channel (e.g. reading a secret with
+# `file strings`, then handing a base32 encoding of it to one of these as a
+# subdomain/hostname of an attacker-controlled zone). See the Tier
+# docstring for why `requires_approval` needs no extra logic for this.
+# ---------------------------------------------------------------------------
+_TAINT_GATED: frozenset = frozenset({
+    # The queried label is forwarded verbatim to whatever nameserver is
+    # authoritative for it - the attacker's own resolver receives the query
+    # if the attacker registered the zone. Same hazard class as the direct
+    # connections gated under EXTERNAL_MUTATION (`network headers/ports/
+    # ssl-check`), but weaker: DNS is a lookup, not a fetch/scan, so it's
+    # gated only when tainted rather than unconditionally.
+    ("network", "dns"),
+    # Weaker cousin of `network dns`: a WHOIS referral query reaches
+    # whatever registrar/registry is authoritative for the queried label,
+    # which is lower-bandwidth and less directly attacker-controlled than
+    # an authoritative DNS answer, but the same shape - the label determines
+    # which external system receives the query, not a fixed host.
+    ("intel", "whois"),
 })
 
 # ---------------------------------------------------------------------------
@@ -246,6 +299,8 @@ def tier_for(path: Sequence[str]) -> Tier:
         return Tier.READ_ONLY
     if key in _CASE_WRITE:
         return Tier.CASE_WRITE
+    if key in _TAINT_GATED:
+        return Tier.TAINT_GATED
     if key in _EXTERNAL_MUTATION:
         return Tier.EXTERNAL_MUTATION
 
