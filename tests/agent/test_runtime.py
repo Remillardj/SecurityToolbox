@@ -685,3 +685,122 @@ class TestStopReason:
         run = AgentRun(agent="triage", provider=StubProvider([]))
 
         assert run.stop_reason is None
+
+
+class FakeMessages:
+    """Captures the request instead of sending it."""
+
+    def __init__(self, response):
+        self.response = response
+        self.request = None
+
+    def create(self, **kwargs):
+        self.request = kwargs
+        return self.response
+
+
+class FakeClient:
+    def __init__(self, response):
+        self.messages = FakeMessages(response)
+
+
+class FakeBlock:
+    def __init__(self, type_, name=None, input_=None):
+        self.type = type_
+        self.name = name
+        self.input = input_
+
+
+class FakeResponse:
+    def __init__(self, content, stop_reason="tool_use"):
+        self.content = content
+        self.stop_reason = stop_reason
+
+
+class TestNextStep:
+    """The provider must not reach the network in any of these."""
+
+    def _provider(self, monkeypatch, response):
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        client = FakeClient(response)
+        return AnthropicProvider(client=client), client
+
+    def test_returns_the_first_tool_call(self, monkeypatch):
+        block = FakeBlock("tool_use", name="bsot_file_hash", input_={"files": ["a"]})
+        provider, _ = self._provider(monkeypatch, FakeResponse([block]))
+
+        call = provider.next_step([{"role": "user", "content": "go"}], [])
+
+        assert call.name == "bsot_file_hash"
+        assert call.params == {"files": ["a"]}
+
+    def test_returns_none_when_the_model_stops(self, monkeypatch):
+        text = FakeBlock("text")
+        provider, _ = self._provider(monkeypatch, FakeResponse([text], "end_turn"))
+
+        assert provider.next_step([{"role": "user", "content": "go"}], []) is None
+
+    def test_refusal_returns_none_even_when_content_carries_a_tool_call(
+        self, monkeypatch
+    ):
+        """
+        A declined request arrives as a normal response, not an error, and a
+        mid-stream refusal can carry partial content. The tool call in that
+        partial output must not be acted on - so this fixture deliberately
+        includes one, which an implementation that only checked for empty
+        content would happily execute.
+        """
+        block = FakeBlock("tool_use", name="bsot_ir_cf_block", input_={"ip": "1.2.3.4"})
+        provider, _ = self._provider(monkeypatch, FakeResponse([block], "refusal"))
+
+        assert provider.next_step([{"role": "user", "content": "go"}], []) is None
+
+    def test_system_is_sent_top_level_not_as_a_message(self, monkeypatch):
+        """A system-role entry at messages[0] is rejected by the API."""
+        provider, client = self._provider(monkeypatch, FakeResponse([], "end_turn"))
+
+        provider.next_step(
+            [
+                {"role": "system", "content": "you are a triage analyst"},
+                {"role": "user", "content": "go"},
+            ],
+            [],
+        )
+        request = client.messages.request
+
+        assert request["system"] == "you are a triage analyst"
+        assert all(m["role"] != "system" for m in request["messages"])
+
+    def test_no_sampling_parameters_are_sent(self, monkeypatch):
+        """temperature/top_p/top_k/budget_tokens are all rejected on this model."""
+        provider, client = self._provider(monkeypatch, FakeResponse([], "end_turn"))
+
+        provider.next_step([{"role": "user", "content": "go"}], [])
+        request = client.messages.request
+
+        for banned in ("temperature", "top_p", "top_k"):
+            assert banned not in request
+        assert "budget_tokens" not in request["thinking"]
+
+    def test_effort_comes_from_the_definition(self, monkeypatch):
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        client = FakeClient(FakeResponse([], "end_turn"))
+        provider = AnthropicProvider(effort="xhigh", client=client)
+
+        provider.next_step([{"role": "user", "content": "go"}], [])
+
+        assert client.messages.request["output_config"]["effort"] == "xhigh"
+
+    def test_missing_sdk_raises_an_actionable_error(self, monkeypatch):
+        from bsot.agent.runtime import AnthropicProvider
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setitem(__import__("sys").modules, "anthropic", None)
+        provider = AnthropicProvider()
+
+        with pytest.raises(RuntimeError, match="pip install anthropic"):
+            provider.next_step([{"role": "user", "content": "go"}], [])

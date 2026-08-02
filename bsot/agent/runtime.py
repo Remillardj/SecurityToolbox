@@ -331,6 +331,7 @@ class AgentRun:
 
 
 MODEL = "claude-opus-5"
+MAX_TOKENS = 16000
 TOOL_SEARCH = {
     "type": "tool_search_tool_bm25_20251119",
     "name": "tool_search_tool_bm25",
@@ -350,7 +351,14 @@ class AnthropicProvider:
     keeps it loaded rather than deferred.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = MODEL):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = MODEL,
+        effort: str = "high",
+        max_tokens: int = MAX_TOKENS,
+        client: Any = None,
+    ):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise RuntimeError(
@@ -358,6 +366,13 @@ class AnthropicProvider:
                 "which keys are configured."
             )
         self.model = model
+        self.effort = effort
+        self.max_tokens = max_tokens
+        # Built on first use, not here: constructing a client at import/init
+        # time would make the SDK a hard dependency of `bsot agent list`,
+        # which needs no API at all. `client` is injectable so the tests can
+        # assert on the request without reaching the network.
+        self._client = client
 
     def build_tools(self, catalogue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -383,6 +398,83 @@ class AnthropicProvider:
             payload = {k: v for k, v in tool.items() if not k.startswith("_")}
             payload["defer_loading"] = True
             tools.append(payload)
+        # record_finding and the tool-search tool are both left undeferred on
+        # purpose. Beyond the design spec's reasoning, the API rejects a
+        # request in which every tool is deferred, so this is also what keeps
+        # the request valid at all.
         tools.append(build_record_finding_tool())
         tools.append(TOOL_SEARCH)
         return tools
+
+    def _get_client(self) -> Any:
+        """
+        Build the SDK client on first use.
+
+        `anthropic` is an optional extra for this package (see pyproject), so
+        the import lives here rather than at module scope: `bsot agent list`
+        and every offline test must work without it installed.
+        """
+        if self._client is None:
+            try:
+                import anthropic
+            except ImportError as exc:
+                raise RuntimeError(
+                    "anthropic library not installed. "
+                    "Install with: pip install anthropic"
+                ) from exc
+            self._client = anthropic.Anthropic(api_key=self.api_key)
+        return self._client
+
+    def _build_request(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Shape one API request.
+
+        The loop seeds its conversation with a leading `{"role": "system"}`
+        entry, but `system` is a top-level parameter on this API, not a
+        message role - an entry in that position is rejected. It is peeled off
+        here rather than in the loop so the loop stays provider-agnostic.
+
+        No `temperature`, `top_p`, `top_k`, or `budget_tokens`: all four are
+        rejected on this model family. Thinking depth is set through effort.
+        """
+        system: Optional[str] = None
+        conversation = list(messages)
+        if conversation and conversation[0].get("role") == "system":
+            system = conversation.pop(0)["content"]
+
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": conversation,
+            "tools": self.build_tools(tools),
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": self.effort},
+        }
+        if system is not None:
+            request["system"] = system
+        return request
+
+    def next_step(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> Optional[ToolCall]:
+        """
+        Ask the model what to do next.
+
+        Returns the first tool call the model requests, or None when it stops
+        - including when safety classifiers decline the request, which arrives
+        as a normal response with `stop_reason == "refusal"` rather than an
+        error, and whose `content` may be empty.
+        """
+        response = self._get_client().messages.create(
+            **self._build_request(messages, tools)
+        )
+
+        if getattr(response, "stop_reason", None) == "refusal":
+            return None
+
+        for block in getattr(response, "content", None) or []:
+            if getattr(block, "type", None) == "tool_use":
+                return ToolCall(name=block.name, params=dict(block.input or {}))
+        return None
