@@ -8,6 +8,7 @@ itself never tries to build a real client. No test writes to ~/.bsot/.
 """
 
 import json
+import json as json_lib
 
 from click.testing import CliRunner
 
@@ -278,3 +279,61 @@ class TestDeclinedRun:
 
         assert result.exit_code == 1
         assert "TRUNCAT" in result.output.upper()
+
+
+def _catalogue():
+    result = CliRunner().invoke(agent, ["catalogue", "--json"])
+    assert result.exit_code == 0, result.output
+    return json_lib.loads(result.output)
+
+
+def test_catalogue_emits_pinned_version_and_commands():
+    payload = _catalogue()
+    assert payload["catalogue_version"] == 1
+    assert isinstance(payload["bsot_version"], str)
+    assert len(payload["commands"]) > 50
+
+
+def test_every_entry_carries_dispatch_metadata_and_a_tier():
+    """SEC_MCP rebuilds argv from `params` and gates on `tier`; an entry
+    missing either is unusable and must never ship."""
+    required = {
+        "name", "path", "description", "input_schema",
+        "params", "supports_json", "tier",
+    }
+    for entry in _catalogue()["commands"]:
+        assert required <= set(entry), entry.get("name")
+        assert entry["tier"] in {
+            "read_only", "case_write", "taint_gated", "external_mutation"
+        }
+
+
+def test_underscore_dispatch_keys_are_promoted_not_leaked():
+    """bridge.py hides these from a model; this consumer is a program, so
+    they are promoted to real keys and the underscore form is gone."""
+    entry = next(
+        e for e in _catalogue()["commands"] if e["name"] == "bsot_intel_enrich"
+    )
+    assert entry["path"] == ["intel", "enrich"]
+    assert not any(k.startswith("_") for k in entry)
+
+
+def test_a_known_read_only_command_is_tiered_read_only():
+    entry = next(
+        e for e in _catalogue()["commands"] if e["name"] == "bsot_data_decode"
+    )
+    assert entry["tier"] == "read_only"
+
+
+def test_a_known_gated_command_is_not_read_only():
+    """network ports is EXTERNAL_MUTATION; if this ever reads read_only the
+    tier export is wired to the wrong function."""
+    entry = next(
+        e for e in _catalogue()["commands"] if e["name"] == "bsot_network_ports"
+    )
+    assert entry["tier"] == "external_mutation"
+
+
+def test_the_agent_group_is_not_in_its_own_catalogue():
+    names = {e["name"] for e in _catalogue()["commands"]}
+    assert not any(n.startswith("bsot_agent") for n in names)

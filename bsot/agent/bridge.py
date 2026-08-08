@@ -106,12 +106,21 @@ def _param_meta(param: click.Parameter) -> Dict[str, Any]:
     backed by `--file`) don't round-trip from the identifier. This is the
     only place that still has the Click Parameter object, so it's the only
     place this can be captured.
+
+    `type` is the Click type name (`"text"`, `"path"`, `"file"`, ...),
+    captured for the same reason: `_TYPE_MAP` (above) collapses `path` and
+    `file` down to the JSON Schema type `"string"`, so `input_schema` alone
+    cannot tell a filesystem-path parameter apart from ordinary text. A
+    downstream consumer that needs to treat paths specially (e.g. resolving
+    them relative to a sandboxed working directory) needs the real type
+    name, and this is the only place that still has it.
     """
     meta: Dict[str, Any] = {
         "kind": "argument" if isinstance(param, click.Argument) else "option",
         "is_flag": bool(getattr(param, "is_flag", False)),
         "multiple": bool(param.multiple),
         "nargs": param.nargs,
+        "type": param.type.name,
     }
 
     if isinstance(param, click.Option):

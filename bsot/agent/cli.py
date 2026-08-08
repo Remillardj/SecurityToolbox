@@ -75,6 +75,68 @@ def list_agents(json_output):
     click.echo()
 
 
+# The contract version for the exported catalogue, consumed by external
+# programs (sec-team-mcp). Bump ONLY on a breaking reshape of an entry:
+# removing a key, changing a key's type, or changing the meaning of `tier`.
+# Adding a new key is backward-compatible and does not bump it. This is
+# deliberately independent of the bsot package version, which moves for
+# unrelated reasons and so cannot serve as a break signal.
+CATALOGUE_VERSION = 1
+
+
+@agent.command()
+@click.option('--json', 'json_output', is_flag=True, help='JSON output')
+def catalogue(json_output):
+    """
+    Export every agent-callable command as a tool schema.
+
+    Publishes what bridge.py derives from the Click tree plus the safety
+    tier safety.py assigns, so an external orchestrator can build its own
+    tool definitions without importing bsot. The `agent` group is absent by
+    construction (bridge.build_catalogue skips it).
+
+    \b
+    Examples:
+        bsot agent catalogue --json
+    """
+    from .bridge import build_catalogue
+    from .safety import tier_for
+    from .. import __version__
+
+    commands = []
+    for tool in build_catalogue():
+        path = tool["_command_path"]
+        commands.append({
+            'name': tool['name'],
+            'path': list(path),
+            'description': tool['description'],
+            'input_schema': tool['input_schema'],
+            'params': tool['_params'],
+            'supports_json': tool['_supports_json'],
+            'tier': tier_for(path).value,
+        })
+
+    if json_output:
+        click.echo(json_lib.dumps({
+            'bsot_version': __version__,
+            'catalogue_version': CATALOGUE_VERSION,
+            'commands': commands,
+        }, indent=2))
+        return
+
+    from ..utils import Colors, print_header
+
+    print_header(f"Agent catalogue ({len(commands)} commands)")
+    by_tier = {}
+    for entry in commands:
+        by_tier.setdefault(entry['tier'], []).append(entry['name'])
+    for tier in sorted(by_tier):
+        click.echo(f"{Colors.BOLD}{tier}{Colors.RESET} "
+                   f"({len(by_tier[tier])})")
+        for name in sorted(by_tier[tier]):
+            click.echo(f"  {name}")
+
+
 def _render_status(run_obj, Colors, print_header, print_subheader):
     """
     Human-readable summary of one run.

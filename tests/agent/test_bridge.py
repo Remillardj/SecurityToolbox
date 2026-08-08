@@ -249,6 +249,26 @@ class TestAgentGroupExcluded:
         assert not offenders
 
 
+class TestParamTypeMeta:
+    """
+    JSON Schema alone can't tell a filesystem-path parameter from plain
+    text - `_TYPE_MAP` collapses both Click's `path` and `file` types to
+    `"string"`. `_params[...]['type']` carries the real Click type name so
+    a downstream consumer (sec-team-mcp) can identify path-typed params
+    without importing bsot.
+    """
+
+    def test_path_typed_param_reports_path_not_text(self):
+        from bsot.cli import get_lazy_plugins
+
+        group = dict(get_lazy_plugins())["file"]._load()
+        schema = command_to_schema(group.get_command(None, "hash"), ["file", "hash"])
+
+        param_type = schema["_params"]["files"]["type"]
+        assert param_type in {"path", "file"}
+        assert param_type != "text"
+
+
 class TestSupportsJson:
     def test_true_when_command_has_json_flag(self):
         from bsot.cli import get_lazy_plugins
