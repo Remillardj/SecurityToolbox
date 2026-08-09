@@ -289,7 +289,7 @@ def _catalogue():
 
 def test_catalogue_emits_pinned_version_and_commands():
     payload = _catalogue()
-    assert payload["catalogue_version"] == 1
+    assert payload["catalogue_version"] == 2
     assert isinstance(payload["bsot_version"], str)
     assert len(payload["commands"]) > 50
 
@@ -337,3 +337,53 @@ def test_a_known_gated_command_is_not_read_only():
 def test_the_agent_group_is_not_in_its_own_catalogue():
     names = {e["name"] for e in _catalogue()["commands"]}
     assert not any(n.startswith("bsot_agent") for n in names)
+
+
+class TestGroups:
+    """`groups` (bsot/agent/manifest.py) is the manifest an external
+    consumer grants from instead of hand-maintaining its own command list -
+    these tests pin the shape of the export, not the manifest's content
+    (see tests/agent/test_manifest.py for that)."""
+
+    def test_groups_key_is_present_and_matches_the_manifest(self):
+        from bsot.agent.manifest import GROUPS
+
+        payload = _catalogue()
+        assert set(payload["groups"]) == set(GROUPS)
+
+    def test_every_grouped_command_name_also_appears_in_commands(self):
+        payload = _catalogue()
+        command_names = {e["name"] for e in payload["commands"]}
+
+        for group_name, commands in payload["groups"].items():
+            for command_name in commands:
+                assert command_name in command_names, (
+                    f"{group_name!r} names {command_name!r}, which is not "
+                    f"in the catalogue's commands list"
+                )
+
+    def test_every_grouped_commands_tier_is_read_only(self):
+        payload = _catalogue()
+        tier_by_name = {e["name"]: e["tier"] for e in payload["commands"]}
+
+        for group_name, commands in payload["groups"].items():
+            for command_name in commands:
+                assert tier_by_name[command_name] == "read_only", (
+                    f"{group_name!r} grants {command_name!r}, which is "
+                    f"tier {tier_by_name[command_name]!r}"
+                )
+
+    def test_grouped_path_params_are_lists_of_real_schema_properties(self):
+        payload = _catalogue()
+        props_by_name = {
+            e["name"]: set(e["input_schema"]["properties"])
+            for e in payload["commands"]
+        }
+
+        for group_name, commands in payload["groups"].items():
+            for command_name, path_params in commands.items():
+                assert isinstance(path_params, list)
+                assert set(path_params) <= props_by_name[command_name], (
+                    f"{group_name!r}/{command_name!r} declares a path "
+                    f"param absent from its own input_schema"
+                )

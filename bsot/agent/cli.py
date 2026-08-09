@@ -81,7 +81,13 @@ def list_agents(json_output):
 # Adding a new key is backward-compatible and does not bump it. This is
 # deliberately independent of the bsot package version, which moves for
 # unrelated reasons and so cannot serve as a break signal.
-CATALOGUE_VERSION = 1
+#
+# 1 -> 2: added the top-level `groups` key (bsot/agent/manifest.py). Bumped
+# because the consumer (sec-team-mcp) refuses a catalogue_version it does
+# not recognize, and the two repos' `groups` contract must land together -
+# an old consumer silently ignoring `groups` would keep running against its
+# own stale, hand-maintained command list instead of failing loudly.
+CATALOGUE_VERSION = 2
 
 
 @agent.command()
@@ -93,19 +99,24 @@ def catalogue(json_output):
     Publishes what bridge.py derives from the Click tree plus the safety
     tier safety.py assigns, so an external orchestrator can build its own
     tool definitions without importing bsot. The `agent` group is absent by
-    construction (bridge.build_catalogue skips it).
+    construction (bridge.build_catalogue skips it). Also publishes the
+    capability groups from manifest.py, so the orchestrator can grant a
+    named bundle of commands instead of hand-maintaining its own list.
 
     \b
     Examples:
         bsot agent catalogue --json
     """
     from .bridge import build_catalogue
+    from .manifest import GROUPS
     from .safety import tier_for
     from .. import __version__
 
     commands = []
+    name_by_path = {}
     for tool in build_catalogue():
         path = tool["_command_path"]
+        name_by_path[tuple(path)] = tool['name']
         commands.append({
             'name': tool['name'],
             'path': list(path),
@@ -116,11 +127,24 @@ def catalogue(json_output):
             'tier': tier_for(path).value,
         })
 
+    # Keyed on the same `bsot_`-prefixed names as `commands` above (rather
+    # than on Click path tuples, which JSON has no native representation
+    # for) so the consumer can join `groups` against `commands` with no
+    # second name transform of its own.
+    groups = {
+        group_name: {
+            name_by_path[path]: list(path_params)
+            for path, path_params in group_commands.items()
+        }
+        for group_name, group_commands in GROUPS.items()
+    }
+
     if json_output:
         click.echo(json_lib.dumps({
             'bsot_version': __version__,
             'catalogue_version': CATALOGUE_VERSION,
             'commands': commands,
+            'groups': groups,
         }, indent=2))
         return
 
