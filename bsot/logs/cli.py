@@ -218,8 +218,8 @@ def timeline(input_file, log_format, filter_user, filter_ip, verbose, json_outpu
     \b
     Examples:
         bsot logs timeline -f auth.log
-        bsot logs timeline -f auth.log --user cyberjunkie
-        bsot logs timeline -f auth.log --ip 65.2.161.68
+        bsot logs timeline -f auth.log --user jsmith
+        bsot logs timeline -f auth.log --ip 203.0.113.68
         bsot logs timeline -f auth.log -v   # verbose mode
     """
     from .parsers import parse_log

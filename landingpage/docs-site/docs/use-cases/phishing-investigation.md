@@ -79,7 +79,7 @@ bsot phishing analyze suspicious.eml
     
     📋 Extracted IOCs
         Domains: company-secure.net
-        IPs:     185.234.72.45
+        IPs:     203.0.113.45
     ```
 
 **Key findings:**
@@ -114,7 +114,7 @@ bsot phishing headers suspicious.eml
     
     ── Routing ───────────────────────────────────────────────
       Mail hops:     2
-      Origin IP:     185.234.72.45 (evil-server.ru)
+      Origin IP:     203.0.113.45 (evil-server.ru)
     ```
 
 **Key findings:**
@@ -157,12 +157,12 @@ The domain was registered just 3 days ago—classic phishing infrastructure.
 Enrich the origin IP:
 
 ```bash
-bsot intel enrich 185.234.72.45
+bsot intel enrich 203.0.113.45
 ```
 
 ??? example "Sample Output"
     ```
-    🔍 Enriching ip: 185.234.72.45
+    🔍 Enriching ip: 203.0.113.45
     
       ▌ VERDICT: MALICIOUS
       ▌ CONFIDENCE: 92%
@@ -279,7 +279,7 @@ bsot case close
 | Type | Value | Description |
 |------|-------|-------------|
 | Domain | company-secure.net | Phishing domain |
-| IP | 185.234.72.45 | Mail server origin |
+| IP | 203.0.113.45 | Mail server origin |
 | URL | hxxps://company-secure[.]net/verify | Credential harvester |
 | Email | support@company-secure.net | Sender address |
 

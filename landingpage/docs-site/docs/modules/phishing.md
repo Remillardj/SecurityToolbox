@@ -104,7 +104,7 @@ bsot phishing analyze suspicious.eml
     📋 Extracted IOCs
         Domains: amaz0n-secure.com
         URLs:    hxxps://amaz0n-secure[.]com/login?id=abc123
-        IPs:     45.33.32.156 (resolved from amaz0n-secure.com)
+        IPs:     198.51.100.156 (resolved from amaz0n-secure.com)
     ```
 
 #### Quick Analysis (No API Calls)
@@ -152,7 +152,7 @@ bsot phishing analyze suspicious.eml --json
       "iocs": {
         "urls": ["https://amaz0n-secure.com/login?id=abc123"],
         "domains": ["amaz0n-secure.com"],
-        "ips": ["45.33.32.156"]
+        "ips": ["198.51.100.156"]
       },
       "attachments": [
         {
@@ -241,7 +241,7 @@ bsot phishing extract-iocs suspicious.eml --json
       • amaz0n-secure.com
     
     ── IP Addresses (1) ──────────────────────────────────────
-      • 45.33.32.156
+      • 198.51.100.156
     
     ── Email Addresses (2) ───────────────────────────────────
       • support@amaz0n-secure.com
@@ -431,7 +431,7 @@ bsot case add suspicious.eml
 bsot malware strings ./attachments/invoice.pdf
 
 # Step 5: Enrich IOCs
-bsot intel enrich 45.33.32.156
+bsot intel enrich 198.51.100.156
 bsot intel enrich amaz0n-secure.com
 
 # Step 6: Document findings

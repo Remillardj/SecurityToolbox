@@ -67,7 +67,7 @@ bsot intel enrich <ioc> [OPTIONS]
 
 ```bash
 # Enrich an IP address
-bsot intel enrich 45.33.32.156
+bsot intel enrich 198.51.100.156
 
 # Enrich a domain
 bsot intel enrich evil-domain.com
@@ -85,7 +85,7 @@ bsot intel enrich 1.2.3.4 --no-cache
 ??? example "Sample Output"
 
     ```
-    🔍 Enriching ip: 45.33.32.156
+    🔍 Enriching ip: 198.51.100.156
        Sources: virustotal, abuseipdb, greynoise, ipinfo
     
     ══════════════════════════════════════════════════════════
@@ -106,7 +106,7 @@ bsot intel enrich 1.2.3.4 --no-cache
     
       VIRUSTOTAL: MALICIOUS
         Detection: 15/90
-        Link: https://virustotal.com/gui/ip-address/45.33.32.156
+        Link: https://virustotal.com/gui/ip-address/198.51.100.156
     
       ABUSEIPDB: MALICIOUS
         Abuse Score: 100%

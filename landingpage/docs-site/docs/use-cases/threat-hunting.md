@@ -44,8 +44,8 @@ bsot intel bulk -f campaign_iocs.txt --progress --json -o enriched_iocs.json
       Unknown: 2
     
     🚨 Malicious IOCs:
-      • 45.33.32.156 (ip)
-      • 185.234.72.45 (ip)
+      • 198.51.100.156 (ip)
+      • 203.0.113.45 (ip)
       • evil-campaign.xyz (domain)
       • update-service.net (domain)
       ...
