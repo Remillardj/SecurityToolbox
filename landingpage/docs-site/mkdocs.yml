@@ -1,7 +1,7 @@
 site_name: BSOT Documentation
 site_description: Blue Security Ops Toolkit — CLI for security analysts
-site_url: https://bsot.dev/docs/
-repo_url: https://github.com/yourname/bsot
+site_url: https://remillardj.github.io/SecurityToolbox/
+repo_url: https://github.com/Remillardj/SecurityToolbox
 repo_name: bsot
 
 # Build output goes into the unified site folder
@@ -131,7 +131,7 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yourname/bsot
+      link: https://github.com/Remillardj/SecurityToolbox
       name: BSOT on GitHub
   homepage: /
   generator: false

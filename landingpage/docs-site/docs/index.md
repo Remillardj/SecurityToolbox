@@ -85,7 +85,7 @@ bsot file hash malware.exe --all
 pip install bsot
 ```
 
-Or download the standalone binary from the [releases page](https://github.com/yourusername/bsot/releases).
+Or download the standalone binary from the [releases page](https://github.com/Remillardj/SecurityToolbox/releases).
 
 ### Basic Usage
 
@@ -140,5 +140,5 @@ bsot file hash sample.exe
 
 - [Examples](examples/index.md) - Quick command examples
 - [CLI Reference](reference/cli.md) - Complete command reference
-- [GitHub Issues](https://github.com/yourusername/bsot/issues) - Report bugs, request features
+- [GitHub Issues](https://github.com/Remillardj/SecurityToolbox/issues) - Report bugs, request features
 - [Marketing Site](/) - Back to homepage

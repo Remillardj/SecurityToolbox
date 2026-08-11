@@ -228,5 +228,5 @@ While the OSINT module is under development, you can use these existing BSOT fea
 
 ## Contributing
 
-Want to help implement OSINT features? Check the [GitHub repository](https://github.com/yourname/bsot) for contribution guidelines.
+Want to help implement OSINT features? Check the [GitHub repository](https://github.com/Remillardj/SecurityToolbox) for contribution guidelines.
 

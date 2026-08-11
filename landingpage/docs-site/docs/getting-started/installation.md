@@ -36,7 +36,7 @@ Pre-built binaries are available for systems without Python.
 
 ```bash
 # Download
-curl -LO https://github.com/yourusername/bsot/releases/latest/download/bsot-macos
+curl -LO https://github.com/Remillardj/SecurityToolbox/releases/latest/download/bsot-macos
 
 # Make executable
 chmod +x bsot-macos
@@ -52,7 +52,7 @@ bsot --version
 
 ```bash
 # Download
-curl -LO https://github.com/yourusername/bsot/releases/latest/download/bsot-linux
+curl -LO https://github.com/Remillardj/SecurityToolbox/releases/latest/download/bsot-linux
 
 # Make executable
 chmod +x bsot-linux
@@ -66,7 +66,7 @@ bsot --version
 
 ### Windows
 
-1. Download `bsot.exe` from [GitHub Releases](https://github.com/yourusername/bsot/releases)
+1. Download `bsot.exe` from [GitHub Releases](https://github.com/Remillardj/SecurityToolbox/releases)
 2. Move to a directory in your PATH
 3. Open Command Prompt and run `bsot --version`
 
@@ -78,8 +78,8 @@ For development or the latest features:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/bsot.git
-cd bsot
+git clone https://github.com/Remillardj/SecurityToolbox.git
+cd SecurityToolbox
 
 # Create virtual environment (optional but recommended)
 python -m venv venv
@@ -102,13 +102,13 @@ Run BSOT in a container:
 
 ```bash
 # Pull image
-docker pull yourusername/bsot:latest
+docker pull ghcr.io/remillardj/securitytoolbox:latest
 
 # Run
-docker run --rm -it yourusername/bsot bsot --help
+docker run --rm -it ghcr.io/remillardj/securitytoolbox bsot --help
 
 # With file access
-docker run --rm -it -v $(pwd):/data yourusername/bsot bsot file hash /data/sample.exe
+docker run --rm -it -v $(pwd):/data ghcr.io/remillardj/securitytoolbox bsot file hash /data/sample.exe
 ```
 
 ---

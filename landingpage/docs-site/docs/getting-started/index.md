@@ -49,16 +49,16 @@ Welcome to BSOT! This guide will help you install, configure, and start using th
 
 === "Binary"
 
-    Download from [GitHub Releases](https://github.com/yourusername/bsot/releases):
+    Download from [GitHub Releases](https://github.com/Remillardj/SecurityToolbox/releases):
 
     ```bash
     # macOS
-    curl -LO https://github.com/yourusername/bsot/releases/latest/download/bsot-macos
+    curl -LO https://github.com/Remillardj/SecurityToolbox/releases/latest/download/bsot-macos
     chmod +x bsot-macos
     sudo mv bsot-macos /usr/local/bin/bsot
 
     # Linux
-    curl -LO https://github.com/yourusername/bsot/releases/latest/download/bsot-linux
+    curl -LO https://github.com/Remillardj/SecurityToolbox/releases/latest/download/bsot-linux
     chmod +x bsot-linux
     sudo mv bsot-linux /usr/local/bin/bsot
     ```
@@ -66,8 +66,8 @@ Welcome to BSOT! This guide will help you install, configure, and start using th
 === "From Source"
 
     ```bash
-    git clone https://github.com/yourusername/bsot.git
-    cd bsot
+    git clone https://github.com/Remillardj/SecurityToolbox.git
+    cd SecurityToolbox
     pip install -e .
     ```
 
