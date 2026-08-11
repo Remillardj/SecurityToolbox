@@ -15,3 +15,9 @@ venv/
 # Project
 testdir/
 site/
+
+# Runtime output that can contain real host or investigation data
+bsot-collection-*/
+scan-results.json
+.env
+*.db
