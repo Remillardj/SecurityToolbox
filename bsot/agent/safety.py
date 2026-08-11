@@ -250,6 +250,10 @@ _EXTERNAL_MUTATION: frozenset = frozenset({
     # Required write-target path with no safe default (bridge.py strips
     # `--output` everywhere else, but only when it's optional).
     ("file", "baseline"),
+    # Same shape as `file baseline`: a required arbitrary write path. The
+    # write lives in its own command precisely so `file cred-scan` (which
+    # only *reads* a baseline via --baseline) could stay READ_ONLY.
+    ("file", "cred-baseline"),
 
     # --- Found in this review, beyond the confirmed list above ---
     # `phishing analyze` (not just `ai-analyze`) silently ships the full

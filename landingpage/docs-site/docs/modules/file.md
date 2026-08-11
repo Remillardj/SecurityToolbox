@@ -271,6 +271,7 @@ bsot file cred-scan <path> [OPTIONS]
 | `--recursive`, `-r` | flag | `true` | Scan recursively |
 | `--no-recursive` | flag | `false` | Disable recursive scanning |
 | `--include-low`, `-l` | flag | `false` | Include low-confidence findings |
+| `--baseline` | path | — | Baseline file of known findings to suppress |
 | `--json` | flag | `false` | JSON output |
 | `--quiet`, `-q` | flag | `false` | Only output on findings (for CI) |
 
@@ -297,8 +298,25 @@ bsot file cred-scan src/
 # Include low-confidence findings
 bsot file cred-scan . --include-low
 
-# CI/CD usage
-bsot file cred-scan . --quiet --json > secrets.json || exit 1
+# CI/CD usage: fail only on findings not recorded in the baseline
+bsot file cred-scan . --baseline .secret-scan-baseline.json --json > /dev/null || exit 1
+```
+
+### Baselines
+
+Repos that legitimately contain secret-shaped text (detection patterns,
+documented placeholder keys) record those known findings once with
+`cred-baseline`; `cred-scan --baseline` then fails only on new findings.
+The baseline stores fingerprints — file, pattern name, and a hash — never
+the matched text, and ignores line numbers so unrelated edits don't
+invalidate it.
+
+```bash
+# Record the current findings as accepted
+bsot file cred-baseline . -o .secret-scan-baseline.json
+
+# Later scans stay clean until a *new* secret appears
+bsot file cred-scan . --baseline .secret-scan-baseline.json
 ```
 
 ??? example "Sample Output"

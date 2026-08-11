@@ -99,7 +99,10 @@ GROUPS: Dict[str, Dict[CommandPath, Tuple[str, ...]]] = {
     # granting one of these means trusting a specialist with secret-
     # adjacent material generally, not with one specific file format.
     "secrets": {
-        ("file", "cred-scan"): ("path",),
+        # `baseline_path` is a read path: cred-scan only loads fingerprints
+        # from it. The command that *writes* a baseline is `file
+        # cred-baseline`, EXTERNAL_MUTATION and deliberately not granted here.
+        ("file", "cred-scan"): ("path", "baseline_path"),
         ("auth", "jwt-decode"): (),
         ("auth", "password-analyze"): (),
         ("auth", "ssh-audit"): ("config_file",),

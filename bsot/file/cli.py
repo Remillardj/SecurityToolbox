@@ -387,62 +387,87 @@ def metadata(file_path, json_output):
 @click.option('--recursive', '-r', is_flag=True, default=True, help='Scan recursively (default: true)')
 @click.option('--no-recursive', is_flag=True, help='Disable recursive scanning')
 @click.option('--include-low', '-l', is_flag=True, help='Include low-confidence findings')
+@click.option('--baseline', 'baseline_path', type=click.Path(),
+              help='Baseline file of known findings to suppress (see cred-baseline)')
 @click.option('--json', 'json_output', is_flag=True, help='JSON output')
 @click.option('--quiet', '-q', is_flag=True, help='Only output on findings (for CI)')
-def cred_scan(path, recursive, no_recursive, include_low, json_output, quiet):
+def cred_scan(path, recursive, no_recursive, include_low, baseline_path,
+              json_output, quiet):
     """
     Scan for hardcoded credentials and secrets.
-    
+
     Detects API keys, private keys, passwords, tokens, and other secrets
-    in source code and configuration files.
-    
+    in source code and configuration files. Known-acceptable findings
+    (detection patterns, documented placeholders) recorded by
+    `bsot file cred-baseline` are suppressed via --baseline, so only new
+    findings fail the scan.
+
     Exit codes:
       0 - No secrets found
       1 - Secrets detected
       2 - Error
-    
+
     \b
     Examples:
         bsot file cred-scan .
         bsot file cred-scan src/ --json
         bsot file cred-scan . --include-low
-        
+
     CI Usage:
-        bsot file cred-scan . --quiet --json > secrets.json || exit 1
+        bsot file cred-scan . --baseline .secret-scan-baseline.json --json || exit 1
     """
-    from .secrets import SecretScanner
+    from .secrets import (
+        ScanResult, SecretScanner, fingerprint_finding, load_baseline,
+    )
     from ..utils import Colors, print_header, print_subheader
-    
+
     scanner = SecretScanner(include_low_confidence=include_low)
-    
+
     path_obj = Path(path)
-    
+
     if path_obj.is_file():
-        # Single file scan
         findings = scanner.scan_file(str(path_obj))
-        result = type('ScanResult', (), {
-            'files_scanned': 1,
-            'files_with_secrets': 1 if findings else 0,
-            'total_findings': len(findings),
-            'findings': findings,
-            'errors': [],
-            'to_dict': lambda self: {
-                'files_scanned': 1,
-                'files_with_secrets': 1 if findings else 0,
-                'total_findings': len(findings),
-                'findings': [f.to_dict() for f in findings],
-                'errors': [],
-            }
-        })()
+        result = ScanResult(
+            files_scanned=1,
+            files_with_secrets=1 if findings else 0,
+            total_findings=len(findings),
+            findings=findings,
+        )
     else:
         # Directory scan
         result = scanner.scan_directory(
             str(path_obj),
             recursive=recursive and not no_recursive
         )
-    
+
+    # Fingerprints are relative to the scan root so baselines written on one
+    # machine hold in CI, which checks out to a different absolute path.
+    fingerprint_root = str(path_obj if path_obj.is_dir() else path_obj.parent)
+
+    suppressed = 0
+    if baseline_path:
+        if not Path(baseline_path).is_file():
+            click.echo(f"Error: baseline not found: {baseline_path}", err=True)
+            sys.exit(2)
+        try:
+            known = load_baseline(baseline_path)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            click.echo(f"Error: could not read baseline: {e}", err=True)
+            sys.exit(2)
+        kept = [
+            f for f in result.findings
+            if fingerprint_finding(f, fingerprint_root) not in known
+        ]
+        suppressed = result.total_findings - len(kept)
+        result.findings = kept
+        result.total_findings = len(kept)
+        result.files_with_secrets = len({f.file_path for f in kept})
+
     if json_output:
-        click.echo(json_lib.dumps(result.to_dict(), indent=2))
+        payload = result.to_dict()
+        if baseline_path:
+            payload['suppressed'] = suppressed
+        click.echo(json_lib.dumps(payload, indent=2))
         if result.total_findings > 0:
             sys.exit(1)
         return
@@ -456,6 +481,8 @@ def cred_scan(path, recursive, no_recursive, include_low, json_output, quiet):
         click.echo(f"  Files scanned: {result.files_scanned}")
         click.echo(f"  Files with secrets: {result.files_with_secrets}")
         click.echo(f"  Total findings: {result.total_findings}")
+        if baseline_path:
+            click.echo(f"  Suppressed by baseline: {suppressed}")
     
     if result.total_findings > 0:
         if not quiet:
@@ -489,6 +516,43 @@ def cred_scan(path, recursive, no_recursive, include_low, json_output, quiet):
             click.echo(f"\n  {Colors.GREEN}✓ No secrets found{Colors.RESET}")
         click.echo()
 
+
+@file.command('cred-baseline')
+@click.argument('path', type=click.Path(exists=True))
+@click.option('--output', '-o', type=click.Path(), required=True,
+              help='Baseline file to write')
+@click.option('--include-low', '-l', is_flag=True, help='Include low-confidence findings')
+def cred_baseline(path, output, include_low):
+    """
+    Record current cred-scan findings as a baseline of accepted matches.
+
+    Each finding is stored as a fingerprint (no secret text, redacted or
+    otherwise), keyed to its file and pattern but not its line number, so
+    unrelated edits don't invalidate the baseline. cred-scan --baseline then
+    fails only on findings not recorded here.
+
+    Kept separate from cred-scan itself so cred-scan never writes to disk
+    (matters to the agent runtime's read-only tiering; same reasoning as
+    `file baseline` vs `file diff`).
+
+    \b
+    Examples:
+        bsot file cred-baseline . -o .secret-scan-baseline.json
+    """
+    from .secrets import SecretScanner, write_baseline
+    from ..utils import Colors
+
+    scanner = SecretScanner(include_low_confidence=include_low)
+    path_obj = Path(path)
+
+    if path_obj.is_file():
+        findings = scanner.scan_file(str(path_obj))
+    else:
+        findings = scanner.scan_directory(str(path_obj)).findings
+
+    root = str(path_obj if path_obj.is_dir() else path_obj.parent)
+    count = write_baseline(output, findings, root)
+    click.echo(f"Baseline written: {output} ({count} fingerprint(s))")
 
 
 @file.command()

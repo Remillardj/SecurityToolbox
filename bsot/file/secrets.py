@@ -3,6 +3,9 @@ Secret Scanner
 Detect hardcoded credentials, API keys, and secrets in files.
 """
 
+import hashlib
+import json
+import os
 import re
 from pathlib import Path
 from typing import List, Dict, Set
@@ -386,4 +389,52 @@ class SecretScanner:
         if len(secret) <= show_chars * 2:
             return '*' * len(secret)
         return secret[:show_chars] + '*' * (len(secret) - show_chars * 2) + secret[-show_chars:]
+
+
+BASELINE_VERSION = 1
+
+
+def _relative_to_root(file_path: str, root: str) -> str:
+    return Path(os.path.relpath(file_path, root)).as_posix()
+
+
+def fingerprint_finding(finding: SecretFinding, root: str) -> str:
+    """
+    Stable identity for a known finding: scan-root-relative path, pattern
+    name, and the redacted match. Line numbers are deliberately excluded so
+    unrelated edits that shift lines do not invalidate a baseline, and the
+    path is relative so a baseline written on one machine holds in CI.
+    """
+    rel = _relative_to_root(finding.file_path, root)
+    material = '\n'.join((rel, finding.secret_type, finding.match))
+    return hashlib.sha256(material.encode('utf-8')).hexdigest()
+
+
+def write_baseline(baseline_path: str, findings: List[SecretFinding], root: str) -> int:
+    """Record fingerprints of the given findings. Returns the count written."""
+    entries = {}
+    for finding in findings:
+        fp = fingerprint_finding(finding, root)
+        entries[fp] = {
+            'file': _relative_to_root(finding.file_path, root),
+            'type': finding.secret_type,
+            'fingerprint': fp,
+        }
+    payload = {
+        'version': BASELINE_VERSION,
+        'findings': sorted(
+            entries.values(),
+            key=lambda e: (e['file'], e['type'], e['fingerprint']),
+        ),
+    }
+    Path(baseline_path).write_text(json.dumps(payload, indent=2) + '\n')
+    return len(entries)
+
+
+def load_baseline(baseline_path: str) -> Set[str]:
+    """Return the set of suppressed fingerprints from a baseline file."""
+    payload = json.loads(Path(baseline_path).read_text())
+    if payload.get('version') != BASELINE_VERSION:
+        raise ValueError(f"unsupported baseline version: {payload.get('version')!r}")
+    return {entry['fingerprint'] for entry in payload.get('findings', [])}
 

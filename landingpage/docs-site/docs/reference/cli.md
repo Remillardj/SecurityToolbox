@@ -228,6 +228,19 @@ bsot file cred-scan [OPTIONS] PATH
 | Option | Description |
 |--------|-------------|
 | `-r, --recursive` | Scan directories recursively |
+| `--baseline PATH` | Suppress findings recorded by `cred-baseline` |
+
+### cred-baseline
+
+Record current cred-scan findings as accepted, for `cred-scan --baseline`.
+
+```bash
+bsot file cred-baseline [OPTIONS] PATH
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output PATH` | Baseline file to write (required) |
 
 ---
 
